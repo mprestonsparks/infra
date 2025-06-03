@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  airflow-service:
+    user: "${AIRFLOW_UID:-50000}:0"
+    build:
+      context: ../airflow-hub
+      dockerfile: docker/Dockerfile.airflow
+    container_name: airflow-service
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+    ports:
+      - "${AIRFLOW_PORT}:8080"
+    env_file:
+      - .env
+    volumes:
+      - ../airflow-hub/dags:/opt/airflow/dags
+      - ../airflow-hub/plugins:/opt/airflow/plugins
+      - ../airflow-hub/logs:/opt/airflow/logs
+    restart: unless-stopped
+
+  indexagent:
+    build:
+      context: ../IndexAgent
+    container_name: indexagent
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+    ports:
+      - "${INDEXAGENT_API_PORT}:8080"
+    env_file:
+      - .env
+    volumes:
+      - /Users/preston/repos:/repos
+      - ../IndexAgent/reports:/app/reports
+      - ../IndexAgent/docs/auto:/app/docs/auto
+    restart: unless-stopped
+
+  zoekt-indexserver:
+    image: sourcegraph/zoekt-indexserver:latest
+    container_name: zoekt-indexserver
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+    ports:
+      - "${ZOEKT_UI_PORT}:6070"
+    volumes:
+      - /Users/preston/repos:/repos
+    restart: unless-stopped
+
+  sourcebot:
+    image: ghcr.io/sourcebot-dev/sourcebot:latest
+    container_name: sourcebot
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+    ports:
+      - "${SOURCEBOT_UI_PORT}:3000"
+    volumes:
+      - /Users/preston/repos:/repos
+    restart: unless-stopped
+
+# Optional: secrets and additional config can be added here

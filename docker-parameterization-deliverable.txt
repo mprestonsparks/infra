@@ -1,0 +1,173 @@
+Agent Task: Parameterize Docker Infra Across Repositories
+
+Objective:
+Ensure all Docker Compose files, Dockerfiles, and orchestration scripts across your four repos are fully parameterized for host ports and platform, so that a single command run from the infra repo drives the entire stack on both ARM64 and AMD64 hosts without port conflicts.
+
+---
+
+1. Create Shared Environment File in infra/
+
+   Path: infra/.env
+   Contents:
+   ```
+   AIRFLOW_PORT=8080
+   VAULT_PORT=8200
+   INDEXAGENT_API_PORT=8080
+   ZOEKT_UI_PORT=6070
+   SOURCEBOT_UI_PORT=3000
+   MARKET_API_PORT=8000
+   DOCKER_DEFAULT_PLATFORM=linux/arm64
+   ```
+   Also commit infra/.env.example with the same keys but no values:
+   ```
+   AIRFLOW_PORT=
+   VAULT_PORT=
+   INDEXAGENT_API_PORT=
+   ZOEKT_UI_PORT=
+   SOURCEBOT_UI_PORT=
+   MARKET_API_PORT=
+   DOCKER_DEFAULT_PLATFORM=
+   ```
+
+---
+
+2. Update Each docker-compose.yml
+
+A. infra/docker-compose.yml
+Replace each hard-coded port and add platform:
+```yaml
+services:
+  airflow:
+    ports:
+      - "${AIRFLOW_PORT}:8080"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+  indexagent:
+    ports:
+      - "${INDEXAGENT_API_PORT}:8080"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+  zoekt-indexserver:
+    ports:
+      - "${ZOEKT_UI_PORT}:6070"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+  sourcebot:
+    ports:
+      - "${SOURCEBOT_UI_PORT}:3000"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+```
+
+B. airflow-hub/docker-compose.yml
+```yaml
+vault:
+  ports:
+    - "${VAULT_PORT}:8200"
+  platform: "${DOCKER_DEFAULT_PLATFORM}"
+webserver:
+  ports:
+    - "${AIRFLOW_PORT}:8080"
+  platform: "${DOCKER_DEFAULT_PLATFORM}"
+```
+
+C. IndexAgent/config/docker-compose.yml
+```yaml
+services:
+  zoekt-indexserver:
+    ports:
+      - "${ZOEKT_UI_PORT}:6070"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+  sourcebot:
+    ports:
+      - "${SOURCEBOT_UI_PORT}:3000"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+  indexagent:
+    ports:
+      - "${INDEXAGENT_API_PORT}:8080"
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+```
+
+D. market-analysis/docker-compose.yml
+```yaml
+api:
+  ports:
+    - "${MARKET_API_PORT}:8000"
+  platform: "${DOCKER_DEFAULT_PLATFORM}"
+```
+
+---
+
+3. Adjust Dockerfiles (if needed)
+
+For any Dockerfile that has EXPOSE or ENV <PORT>, convert to build-arg:
+```dockerfile
+ARG API_PORT
+ENV API_PORT=${API_PORT}
+EXPOSE ${API_PORT}
+```
+And in the matching compose service:
+```yaml
+build:
+  context: .
+  args:
+    - API_PORT=${MARKET_API_PORT}
+environment:
+  - API_PORT=${MARKET_API_PORT}
+ports:
+  - "${MARKET_API_PORT}:${MARKET_API_PORT}"
+platform: "${DOCKER_DEFAULT_PLATFORM}"
+```
+
+---
+
+4. Add Pre-Flight Port Checker in infra/
+
+Create infra/scripts/check-ports.sh with:
+```bash
+#!/usr/bin/env bash
+set -e
+[ -f .env ] && export $(grep -v '^#' .env | xargs)
+for PORT in "$AIRFLOW_PORT" "$VAULT_PORT" "$INDEXAGENT_API_PORT" "$ZOEKT_UI_PORT" "$SOURCEBOT_UI_PORT" "$MARKET_API_PORT"; do
+  if lsof -i ":${PORT}" -sTCP:LISTEN -t >/dev/null; then
+    echo "Port $PORT in use. Free it or override in infra/.env."
+    exit 1
+  fi
+done
+echo "All ports free."
+```
+Make executable: `chmod +x infra/scripts/check-ports.sh`
+
+---
+
+5. Add Unified Makefile in infra/
+
+infra/Makefile:
+```makefile
+include .env
+
+.PHONY: check-ports up
+
+check-ports:
+	@bash scripts/check-ports.sh
+
+up: check-ports
+	DOCKER_DEFAULT_PLATFORM=${DOCKER_DEFAULT_PLATFORM} \
+	docker compose \
+	-f docker-compose.yml \
+	-f ../airflow-hub/docker-compose.yml \
+	-f ../IndexAgent/config/docker-compose.yml \
+	-f ../market-analysis/docker-compose.yml \
+	up -d
+```
+
+---
+
+6. Verification (run from infra/):
+```sh
+source .env
+make up
+docker compose ps
+lsof -i :${AIRFLOW_PORT} :${VAULT_PORT} :${INDEXAGENT_API_PORT} :${ZOEKT_UI_PORT} :${SOURCEBOT_UI_PORT} :${MARKET_API_PORT}
+```
+
+---
+
+Deliverable:
+A single plain-text file containing the above sections, ready to feed to the AI coding agent.

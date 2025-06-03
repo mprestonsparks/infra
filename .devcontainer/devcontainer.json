@@ -1,0 +1,108 @@
+{
+  "name": "Infrastructure Development Environment",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "runArgs": [
+    "--init",
+    "--privileged"
+  ],
+  "mounts": [
+    "source=/var/run/docker.sock,target=/var/run/docker.sock,type=bind",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/data,target=/data,type=bind,consistency=cached",
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/logs,target=/logs,type=bind,consistency=cached"
+  ],
+  "remoteUser": "vscode",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "version": "latest",
+      "enableNonRootDocker": "true"
+    },
+    "ghcr.io/devcontainers/features/git:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/terraform:1": {
+      "version": "latest"
+    },
+    "ghcr.io/devcontainers/features/kubectl-helm-minikube:1": {
+      "version": "latest"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "ms-vscode.makefile-tools",
+        "ms-vscode.vscode-json",
+        "redhat.vscode-yaml",
+        "ms-vscode.vscode-markdown",
+        "DavidAnson.vscode-markdownlint",
+        "hashicorp.terraform",
+        "ms-kubernetes-tools.vscode-kubernetes-tools",
+        "ms-vscode-remote.remote-containers",
+        "timonwong.shellcheck",
+        "foxundermoon.shell-format"
+      ],
+      "settings": {
+        "files.watcherExclude": {
+          "**/node_modules/**": true,
+          "**/.git/objects/**": true,
+          "**/logs/**": true,
+          "**/data/**": true,
+          "**/.terraform/**": true,
+          "**/terraform.tfstate*": true
+        },
+        "files.exclude": {
+          "**/.terraform": true,
+          "**/terraform.tfstate*": true
+        },
+        "terminal.integrated.defaultProfile.linux": "bash",
+        "docker.dockerPath": "/usr/bin/docker",
+        "terraform.experimentalFeatures.validateOnSave": true,
+        "terraform.experimentalFeatures.prefillRequiredFields": true
+      }
+    }
+  },
+  "forwardPorts": [
+    8080,
+    8081,
+    8000,
+    8200,
+    5432
+  ],
+  "portsAttributes": {
+    "8080": {
+      "label": "Airflow UI",
+      "onAutoForward": "silent"
+    },
+    "8081": {
+      "label": "IndexAgent API",
+      "onAutoForward": "silent"
+    },
+    "8000": {
+      "label": "Market Analysis API",
+      "onAutoForward": "silent"
+    },
+    "8200": {
+      "label": "Vault UI",
+      "onAutoForward": "silent"
+    },
+    "5432": {
+      "label": "PostgreSQL",
+      "onAutoForward": "silent"
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "bash .devcontainer/post-start.sh",
+  "remoteEnv": {
+    "DOCKER_BUILDKIT": "1",
+    "COMPOSE_DOCKER_CLI_BUILD": "1",
+    "VAULT_ADDR": "http://host.docker.internal:8200"
+  },
+  "containerEnv": {
+    "INFRA_DEV_CONTAINER": "true"
+  },
+  "workspaceFolder": "/workspaces/infra",
+  "shutdownAction": "stopContainer"
+}
