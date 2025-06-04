@@ -1,0 +1,61 @@
+# DEAN Agent Evolution Service Dependencies
+
+# FastAPI and web server
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# HTTP and networking
+httpx==0.25.2
+requests==2.31.0
+
+# Async support
+asyncio-mqtt==0.16.1
+aiofiles==23.2.1
+
+# Database and storage
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
+
+# Git operations
+GitPython==3.1.40
+
+# AI/ML libraries
+dspy-ai==2.4.9
+openai==1.3.7
+anthropic==0.7.7
+
+# Data processing
+numpy==1.24.4
+pandas==2.1.4
+scipy==1.11.4
+
+# Configuration and environment
+python-dotenv==1.0.0
+pydantic-settings==2.1.0
+
+# Logging and monitoring
+structlog==23.2.0
+prometheus-client==0.19.0
+
+# Testing (for development)
+pytest==7.4.3
+pytest-asyncio==0.21.1
+pytest-mock==3.12.0
+httpx==0.25.2  # For testing HTTP endpoints
+
+# Security
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
+
+# Utilities
+click==8.1.7
+rich==13.7.0
+typing-extensions==4.8.0
+
+# Optional: Development tools (comment out for production)
+black==23.11.0
+isort==5.12.0
+flake8==6.1.0
+mypy==1.7.1

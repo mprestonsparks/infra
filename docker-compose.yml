@@ -53,4 +53,64 @@ services:
       - /Users/preston/repos:/repos
     restart: unless-stopped
 
+  # DEAN System Services
+  dean-postgres:
+    image: postgres:15-alpine
+    container_name: dean-postgres
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+    environment:
+      POSTGRES_DB: "${DEAN_DB_NAME:-dean}"
+      POSTGRES_USER: "${DEAN_DB_USER:-dean_user}"
+      POSTGRES_PASSWORD: "${DEAN_DB_PASSWORD:-dean_password}"
+    ports:
+      - "${DEAN_DB_PORT:-5432}:5432"
+    volumes:
+      - dean_postgres_data:/var/lib/postgresql/data
+      - ./modules/agent-evolution/src/dean/repository/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DEAN_DB_USER:-dean_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dean-agent-evolution:
+    build:
+      context: ./modules/agent-evolution
+      dockerfile: Dockerfile
+    container_name: dean-agent-evolution
+    platform: "${DOCKER_DEFAULT_PLATFORM}"
+    ports:
+      - "${DEAN_API_PORT:-8000}:8000"
+    environment:
+      - DEAN_DB_HOST=dean-postgres
+      - DEAN_DB_PORT=5432
+      - DEAN_DB_NAME=${DEAN_DB_NAME:-dean}
+      - DEAN_DB_USER=${DEAN_DB_USER:-dean_user}
+      - DEAN_DB_PASSWORD=${DEAN_DB_PASSWORD:-dean_password}
+      - DEAN_LOG_LEVEL=${DEAN_LOG_LEVEL:-INFO}
+      - DEAN_TOKEN_BUDGET_DEFAULT=${DEAN_TOKEN_BUDGET_DEFAULT:-1000}
+      - DEAN_MAX_AGENTS=${DEAN_MAX_AGENTS:-100}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    env_file:
+      - .env
+    volumes:
+      - ./modules/agent-evolution/data:/app/data
+      - ./modules/agent-evolution/logs:/app/logs
+      - ./modules/agent-evolution/config:/app/config
+      - /tmp/dean-worktrees:/app/tmp
+    depends_on:
+      dean-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  dean_postgres_data:
+
 # Optional: secrets and additional config can be added here
