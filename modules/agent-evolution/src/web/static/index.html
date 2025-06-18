@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DEAN Control Interface - Agent Evolution</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .animate-pulse-slow { animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        .animate-spin-slow { animation: spin 2s linear infinite; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .scrollbar-thin::-webkit-scrollbar { width: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #1f2937; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #4b5563; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <!-- Header -->
+    <header class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-3">
+                    <div id="connectionStatus" class="w-3 h-3 bg-green-500 rounded-full animate-pulse-slow"></div>
+                    <h1 class="text-xl font-semibold text-gray-900">DEAN Control Interface</h1>
+                    <span class="text-sm text-gray-500">Agent Evolution System</span>
+                </div>
+                <div class="flex items-center space-x-4 text-sm text-gray-600">
+                    <span>WebSocket: <span id="wsStatus" class="font-medium text-green-600">Connected</span></span>
+                    <span>System Time: <span id="systemTime" class="font-medium">--:--:--</span></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- Top Row: Evolution Control & Real-time Metrics -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Evolution Control -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Evolution Control</h2>
+                
+                <!-- Status Display -->
+                <div class="bg-gray-50 rounded-lg p-4 mb-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-sm text-gray-600">Status</p>
+                            <p id="evolutionStatus" class="text-lg font-semibold text-gray-900">Idle</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Generation</p>
+                            <p id="currentGeneration" class="text-lg font-semibold text-blue-600">-</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Active Agents</p>
+                            <p id="activeAgents" class="text-lg font-semibold text-green-600">-</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Token Budget Used</p>
+                            <p id="tokenBudgetUsed" class="text-lg font-semibold text-purple-600">-</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Generations</label>
+                        <input type="number" id="generations" value="10" min="1" max="100"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Agents per Generation</label>
+                        <input type="number" id="agentsPerGen" value="5" min="1" max="20"
+                               class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">Initial Strategies</label>
+                        <select id="strategies" multiple size="4"
+                                class="w-full px-3 py-2 border border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500">
+                            <option value="optimization" selected>Code Optimization</option>
+                            <option value="refactoring" selected>Refactoring</option>
+                            <option value="test_improvement">Test Improvement</option>
+                            <option value="documentation">Documentation</option>
+                            <option value="security">Security Analysis</option>
+                            <option value="performance">Performance Tuning</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">Hold Ctrl/Cmd to select multiple</p>
+                    </div>
+                    
+                    <div class="flex space-x-3 pt-2">
+                        <button id="startBtn" onclick="startEvolution()"
+                                class="flex-1 bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors font-medium">
+                            Start Evolution
+                        </button>
+                        <button id="pauseBtn" onclick="pauseEvolution()" disabled
+                                class="flex-1 bg-yellow-500 text-white px-4 py-2 rounded-md hover:bg-yellow-600 transition-colors font-medium disabled:bg-gray-300 disabled:cursor-not-allowed">
+                            Pause
+                        </button>
+                        <button id="stopBtn" onclick="stopEvolution()" disabled
+                                class="flex-1 bg-red-600 text-white px-4 py-2 rounded-md hover:bg-red-700 transition-colors font-medium disabled:bg-gray-300 disabled:cursor-not-allowed">
+                            Stop
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Real-time Metrics -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Real-time Metrics</h2>
+                
+                <!-- Agent Population Chart -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-medium text-gray-700 mb-2">Agent Population</h3>
+                    <div class="bg-gray-50 rounded-lg p-4 h-32">
+                        <canvas id="populationChart" class="w-full h-full"></canvas>
+                    </div>
+                </div>
+
+                <!-- Pattern Discovery Stats -->
+                <div>
+                    <h3 class="text-sm font-medium text-gray-700 mb-2">Pattern Discovery</h3>
+                    <div class="grid grid-cols-3 gap-4">
+                        <div class="bg-blue-50 rounded-lg p-3 text-center">
+                            <p class="text-2xl font-bold text-blue-600" id="totalPatterns">0</p>
+                            <p class="text-xs text-blue-800">Total</p>
+                        </div>
+                        <div class="bg-green-50 rounded-lg p-3 text-center">
+                            <p class="text-2xl font-bold text-green-600" id="approvedPatterns">0</p>
+                            <p class="text-xs text-green-800">Approved</p>
+                        </div>
+                        <div class="bg-yellow-50 rounded-lg p-3 text-center">
+                            <p class="text-2xl font-bold text-yellow-600" id="pendingPatterns">0</p>
+                            <p class="text-xs text-yellow-800">Pending</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Middle Row: Pattern Approval & System Parameters -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <!-- Pattern Approval -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">Pattern Approval Queue</h2>
+                <div id="patternQueue" class="space-y-3 max-h-96 overflow-y-auto scrollbar-thin">
+                    <div class="text-center py-8 text-gray-500">
+                        <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                        </svg>
+                        <p>No patterns pending approval</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- System Parameters -->
+            <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+                <h2 class="text-lg font-semibold text-gray-900 mb-4">System Parameters</h2>
+                
+                <!-- Token Budget -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-medium text-gray-700 mb-3">Token Budget</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">Total Budget</label>
+                            <input type="number" id="totalBudget" value="1000000" min="10000"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-600 mb-1">Per Agent</label>
+                            <input type="number" id="perAgentBudget" value="10000" min="1000"
+                                   class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Diversity Settings -->
+                <div class="mb-6">
+                    <h3 class="text-sm font-medium text-gray-700 mb-3">Diversity Settings</h3>
+                    <div class="space-y-4">
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-gray-600">Minimum Threshold</label>
+                                <span id="diversityValue" class="text-xs font-medium text-gray-900">30%</span>
+                            </div>
+                            <input type="range" id="diversityThreshold" min="0" max="100" value="30"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                        <div>
+                            <div class="flex justify-between mb-1">
+                                <label class="text-xs text-gray-600">Intervention Rate</label>
+                                <span id="interventionValue" class="text-xs font-medium text-gray-900">10%</span>
+                            </div>
+                            <input type="range" id="interventionRate" min="0" max="50" value="10"
+                                   class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="updateParameters()"
+                        class="w-full bg-gray-800 text-white px-4 py-2 rounded-md hover:bg-gray-900 transition-colors font-medium">
+                    Update Parameters
+                </button>
+            </div>
+        </div>
+
+        <!-- Bottom: Live Logs -->
+        <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-semibold text-gray-900">Live System Logs</h2>
+                <div class="flex items-center space-x-2">
+                    <button onclick="clearLogs()" class="text-sm text-gray-600 hover:text-gray-900">Clear</button>
+                    <button onclick="exportLogs()" class="text-sm text-gray-600 hover:text-gray-900">Export</button>
+                </div>
+            </div>
+            <div id="logViewer" class="bg-gray-900 text-gray-100 rounded-lg p-4 h-64 overflow-y-auto scrollbar-thin font-mono text-sm">
+                <div class="log-entry">
+                    <span class="text-gray-500">00:00:00</span>
+                    <span class="text-green-400">[INFO]</span>
+                    <span>DEAN Control Interface initialized</span>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-6 right-6 transform translate-y-full opacity-0 transition-all duration-300">
+        <div class="bg-gray-900 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-3">
+            <div id="toastIcon"></div>
+            <p id="toastMessage"></p>
+        </div>
+    </div>
+
+    <script>
+        // WebSocket connection
+        let ws = null;
+        let currentTrialId = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        
+        // Chart data
+        let populationData = {
+            labels: [],
+            datasets: [{
+                label: 'Active Agents',
+                data: [],
+                borderColor: 'rgb(59, 130, 246)',
+                backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                tension: 0.4
+            }]
+        };
+        
+        // Initialize WebSocket
+        function initWebSocket() {
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.hostname}:8091/ws`;
+            
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+                addLog('info', 'Connected to DEAN system');
+                
+                // Subscribe to all channels
+                ws.send(JSON.stringify({
+                    type: 'subscribe',
+                    channels: ['evolution', 'agents', 'patterns', 'metrics']
+                }));
+            };
+            
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleWebSocketMessage(data);
+                } catch (error) {
+                    console.error('Failed to parse WebSocket message:', error);
+                }
+            };
+            
+            ws.onclose = () => {
+                updateConnectionStatus(false);
+                addLog('error', 'Disconnected from DEAN system');
+                
+                // Attempt reconnect with exponential backoff
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    reconnectAttempts++;
+                    addLog('info', `Reconnecting in ${delay/1000}s (attempt ${reconnectAttempts}/${maxReconnectAttempts})`);
+                    setTimeout(initWebSocket, delay);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                addLog('error', 'WebSocket error occurred');
+            };
+        }
+        
+        // Handle incoming WebSocket messages
+        function handleWebSocketMessage(data) {
+            switch (data.type) {
+                case 'subscription_confirmed':
+                    addLog('info', `Subscribed to channels: ${data.channels.join(', ')}`);
+                    break;
+                    
+                case 'evolution_update':
+                    updateEvolutionStatus(data.data);
+                    break;
+                    
+                case 'pattern_discovered':
+                    addPendingPattern(data.data);
+                    updatePatternStats();
+                    break;
+                    
+                case 'generation_complete':
+                    addLog('info', `Generation ${data.data.generation} complete - Fitness: ${data.data.avg_fitness?.toFixed(3) || 'N/A'}`);
+                    break;
+                    
+                case 'agent_update':
+                    updateAgentPopulation(data.data);
+                    break;
+                    
+                case 'token_budget_update':
+                    updateTokenBudget(data.data);
+                    break;
+                    
+                default:
+                    console.log('Unknown message type:', data.type);
+            }
+        }
+        
+        // Evolution control functions
+        async function startEvolution() {
+            const generations = document.getElementById('generations').value;
+            const agents = document.getElementById('agentsPerGen').value;
+            const strategiesSelect = document.getElementById('strategies');
+            const strategies = Array.from(strategiesSelect.selectedOptions).map(opt => opt.value);
+            
+            if (strategies.length === 0) {
+                showToast('Please select at least one strategy', 'warning');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/evolution/start', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        generations: parseInt(generations), 
+                        agents_per_generation: parseInt(agents), 
+                        initial_strategies: strategies 
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                currentTrialId = data.trial_id;
+                
+                showToast('Evolution started successfully', 'success');
+                addLog('info', `Started evolution trial: ${currentTrialId}`);
+                
+                // Update UI
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('pauseBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = false;
+                
+                // Reset chart data
+                populationData.labels = [];
+                populationData.datasets[0].data = [];
+                
+            } catch (error) {
+                showToast('Failed to start evolution', 'error');
+                addLog('error', `Start evolution failed: ${error.message}`);
+            }
+        }
+        
+        async function pauseEvolution() {
+            if (!currentTrialId) return;
+            
+            try {
+                const response = await fetch(`/api/evolution/${currentTrialId}/pause`, { method: 'POST' });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                showToast('Evolution paused', 'info');
+                addLog('info', 'Evolution paused');
+                
+                document.getElementById('pauseBtn').textContent = 'Resume';
+                document.getElementById('pauseBtn').onclick = resumeEvolution;
+            } catch (error) {
+                showToast('Failed to pause evolution', 'error');
+            }
+        }
+        
+        async function resumeEvolution() {
+            if (!currentTrialId) return;
+            
+            try {
+                const response = await fetch(`/api/evolution/${currentTrialId}/resume`, { method: 'POST' });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                showToast('Evolution resumed', 'info');
+                addLog('info', 'Evolution resumed');
+                
+                document.getElementById('pauseBtn').textContent = 'Pause';
+                document.getElementById('pauseBtn').onclick = pauseEvolution;
+            } catch (error) {
+                showToast('Failed to resume evolution', 'error');
+            }
+        }
+        
+        async function stopEvolution() {
+            if (!currentTrialId) return;
+            
+            if (!confirm('Are you sure you want to stop the evolution? This cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/evolution/${currentTrialId}/stop`, { method: 'POST' });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                showToast('Evolution stopped', 'info');
+                addLog('info', 'Evolution stopped');
+                
+                // Reset UI
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('pauseBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = true;
+                currentTrialId = null;
+                
+                // Update status
+                document.getElementById('evolutionStatus').textContent = 'Idle';
+                document.getElementById('currentGeneration').textContent = '-';
+                document.getElementById('activeAgents').textContent = '-';
+                
+            } catch (error) {
+                showToast('Failed to stop evolution', 'error');
+            }
+        }
+        
+        // Pattern approval functions
+        async function approvePattern(patternId) {
+            try {
+                const response = await fetch(`/api/patterns/${patternId}/approve`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ auto_propagate: true })
+                });
+                
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                showToast('Pattern approved', 'success');
+                removePatternFromUI(patternId);
+                updatePatternStats();
+                
+            } catch (error) {
+                showToast('Failed to approve pattern', 'error');
+            }
+        }
+        
+        async function rejectPattern(patternId) {
+            try {
+                const response = await fetch(`/api/patterns/${patternId}/reject`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reason: 'manual_rejection' })
+                });
+                
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                
+                showToast('Pattern rejected', 'info');
+                removePatternFromUI(patternId);
+                updatePatternStats();
+                
+            } catch (error) {
+                showToast('Failed to reject pattern', 'error');
+            }
+        }
+        
+        // Parameter update functions
+        async function updateParameters() {
+            const updates = {
+                token_budget: {
+                    total: parseInt(document.getElementById('totalBudget').value),
+                    per_agent: parseInt(document.getElementById('perAgentBudget').value)
+                },
+                diversity: {
+                    min_threshold: parseInt(document.getElementById('diversityThreshold').value) / 100,
+                    intervention_rate: parseInt(document.getElementById('interventionRate').value) / 100
+                }
+            };
+            
+            try {
+                // Update token budget
+                let response = await fetch('/api/parameters/token_budget', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updates.token_budget)
+                });
+                
+                if (!response.ok) throw new Error('Failed to update token budget');
+                
+                // Update diversity settings
+                response = await fetch('/api/parameters/diversity', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updates.diversity)
+                });
+                
+                if (!response.ok) throw new Error('Failed to update diversity settings');
+                
+                showToast('Parameters updated successfully', 'success');
+                addLog('info', 'System parameters updated');
+                
+            } catch (error) {
+                showToast(error.message || 'Failed to update parameters', 'error');
+            }
+        }
+        
+        // UI helper functions
+        function updateConnectionStatus(connected) {
+            const statusDot = document.getElementById('connectionStatus');
+            const wsStatus = document.getElementById('wsStatus');
+            
+            if (connected) {
+                statusDot.className = 'w-3 h-3 bg-green-500 rounded-full animate-pulse-slow';
+                wsStatus.textContent = 'Connected';
+                wsStatus.className = 'font-medium text-green-600';
+            } else {
+                statusDot.className = 'w-3 h-3 bg-red-500 rounded-full';
+                wsStatus.textContent = 'Disconnected';
+                wsStatus.className = 'font-medium text-red-600';
+            }
+        }
+        
+        function updateEvolutionStatus(status) {
+            document.getElementById('evolutionStatus').textContent = status.status || 'Running';
+            document.getElementById('currentGeneration').textContent = status.generation || '-';
+            document.getElementById('activeAgents').textContent = status.active_agents || '-';
+            
+            // Update population chart
+            if (status.generation && status.active_agents) {
+                populationData.labels.push(`Gen ${status.generation}`);
+                populationData.datasets[0].data.push(status.active_agents);
+                
+                // Keep only last 20 data points
+                if (populationData.labels.length > 20) {
+                    populationData.labels.shift();
+                    populationData.datasets[0].data.shift();
+                }
+                
+                updatePopulationChart();
+            }
+        }
+        
+        function updateTokenBudget(data) {
+            const used = data.used || 0;
+            const total = data.total || 1000000;
+            const percentage = ((used / total) * 100).toFixed(1);
+            
+            document.getElementById('tokenBudgetUsed').textContent = `${used.toLocaleString()} / ${total.toLocaleString()} (${percentage}%)`;
+        }
+        
+        function addPendingPattern(pattern) {
+            const container = document.getElementById('patternQueue');
+            
+            // Remove placeholder if exists
+            const placeholder = container.querySelector('.text-center');
+            if (placeholder) {
+                placeholder.remove();
+            }
+            
+            const patternEl = document.createElement('div');
+            patternEl.className = 'bg-gray-50 rounded-lg p-4 border border-gray-200';
+            patternEl.id = `pattern-${pattern.pattern_id}`;
+            
+            const patternTypeColors = {
+                'optimization': 'bg-blue-100 text-blue-800',
+                'refactoring': 'bg-purple-100 text-purple-800',
+                'security': 'bg-red-100 text-red-800',
+                'performance': 'bg-green-100 text-green-800',
+                'test': 'bg-yellow-100 text-yellow-800'
+            };
+            
+            const typeColor = patternTypeColors[pattern.type] || 'bg-gray-100 text-gray-800';
+            
+            patternEl.innerHTML = `
+                <div class="flex items-start justify-between mb-2">
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${typeColor}">
+                        ${pattern.type}
+                    </span>
+                    <span class="text-sm text-gray-500">Confidence: ${(pattern.confidence * 100).toFixed(0)}%</span>
+                </div>
+                <p class="text-sm text-gray-700 mb-3">${pattern.description}</p>
+                <div class="flex space-x-2">
+                    <button onclick="approvePattern('${pattern.pattern_id}')"
+                            class="flex-1 bg-green-600 text-white px-3 py-1.5 rounded text-sm hover:bg-green-700 transition-colors">
+                        Approve
+                    </button>
+                    <button onclick="rejectPattern('${pattern.pattern_id}')"
+                            class="flex-1 bg-red-600 text-white px-3 py-1.5 rounded text-sm hover:bg-red-700 transition-colors">
+                        Reject
+                    </button>
+                </div>
+            `;
+            
+            container.appendChild(patternEl);
+        }
+        
+        function removePatternFromUI(patternId) {
+            const element = document.getElementById(`pattern-${patternId}`);
+            if (element) {
+                element.remove();
+                
+                // Add placeholder if no patterns left
+                const container = document.getElementById('patternQueue');
+                if (container.children.length === 0) {
+                    container.innerHTML = `
+                        <div class="text-center py-8 text-gray-500">
+                            <svg class="w-12 h-12 mx-auto mb-3 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path>
+                            </svg>
+                            <p>No patterns pending approval</p>
+                        </div>
+                    `;
+                }
+            }
+        }
+        
+        function updatePatternStats() {
+            // This would normally fetch from the API, but for now we'll count DOM elements
+            const pending = document.querySelectorAll('#patternQueue > div:not(.text-center)').length;
+            document.getElementById('pendingPatterns').textContent = pending;
+            
+            // These would come from the API in a real implementation
+            // For now, just increment when patterns are approved
+            const approved = parseInt(document.getElementById('approvedPatterns').textContent) || 0;
+            const total = parseInt(document.getElementById('totalPatterns').textContent) || 0;
+            
+            if (pending > 0) {
+                document.getElementById('totalPatterns').textContent = total + 1;
+            }
+        }
+        
+        function addLog(level, message) {
+            const logViewer = document.getElementById('logViewer');
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            
+            const levelColors = {
+                'info': 'text-green-400',
+                'warning': 'text-yellow-400',
+                'error': 'text-red-400',
+                'debug': 'text-gray-400'
+            };
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry mb-1';
+            entry.innerHTML = `
+                <span class="text-gray-500">${time}</span>
+                <span class="${levelColors[level] || 'text-gray-400'}">[${level.toUpperCase()}]</span>
+                <span>${message}</span>
+            `;
+            
+            logViewer.appendChild(entry);
+            logViewer.scrollTop = logViewer.scrollHeight;
+            
+            // Keep only last 100 entries
+            while (logViewer.children.length > 100) {
+                logViewer.removeChild(logViewer.firstChild);
+            }
+        }
+        
+        function clearLogs() {
+            const logViewer = document.getElementById('logViewer');
+            logViewer.innerHTML = '';
+            addLog('info', 'Logs cleared');
+        }
+        
+        function exportLogs() {
+            const logViewer = document.getElementById('logViewer');
+            const logs = Array.from(logViewer.children).map(entry => entry.textContent).join('\n');
+            
+            const blob = new Blob([logs], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `dean-logs-${new Date().toISOString()}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            showToast('Logs exported successfully', 'success');
+        }
+        
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            const toastMessage = document.getElementById('toastMessage');
+            const toastIcon = document.getElementById('toastIcon');
+            
+            const icons = {
+                'success': '<svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>',
+                'error': '<svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>',
+                'warning': '<svg class="w-5 h-5 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>',
+                'info': '<svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'
+            };
+            
+            toastMessage.textContent = message;
+            toastIcon.innerHTML = icons[type] || icons['info'];
+            
+            toast.classList.remove('translate-y-full', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+            
+            setTimeout(() => {
+                toast.classList.add('translate-y-full', 'opacity-0');
+                toast.classList.remove('translate-y-0', 'opacity-100');
+            }, 3000);
+        }
+        
+        function updatePopulationChart() {
+            // In a real implementation, this would use Chart.js or similar
+            // For now, we'll just log the data
+            console.log('Population data:', populationData);
+        }
+        
+        function updateSystemTime() {
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            document.getElementById('systemTime').textContent = time;
+        }
+        
+        // Slider value updates
+        document.getElementById('diversityThreshold').addEventListener('input', (e) => {
+            document.getElementById('diversityValue').textContent = `${e.target.value}%`;
+        });
+        
+        document.getElementById('interventionRate').addEventListener('input', (e) => {
+            document.getElementById('interventionValue').textContent = `${e.target.value}%`;
+        });
+        
+        // Initialize on load
+        window.addEventListener('load', () => {
+            initWebSocket();
+            addLog('info', 'DEAN Control Interface loaded');
+            
+            // Update system time every second
+            setInterval(updateSystemTime, 1000);
+            updateSystemTime();
+        });
+        
+        // Clean up on unload
+        window.addEventListener('beforeunload', () => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+            }
+        });
+    </script>
+</body>
+</html>

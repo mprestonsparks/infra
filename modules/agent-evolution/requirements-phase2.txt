@@ -1,0 +1,74 @@
+# Phase 2 specific requirements for DEAN Agent Evolution Module
+# These are additional dependencies for Phase 2 features
+
+# WebSocket support
+websockets==12.0
+aiohttp-cors==0.7.0
+aiohttp-session==2.12.0
+
+# Template engine for deployment configs
+Jinja2==3.1.4
+MarkupSafe==2.1.5
+
+# Docker integration (optional - for container management)
+# Note: Uncomment if actually using Docker SDK
+# docker==7.1.0
+
+# Kubernetes integration (optional - for K8s deployments)  
+# Note: Uncomment if actually using Kubernetes SDK
+# kubernetes==29.0.0
+
+# Cloud provider SDKs (optional - uncomment as needed)
+# boto3==1.34.131  # AWS
+# google-cloud-storage==2.17.0  # GCP
+# azure-storage-blob==12.20.0  # Azure
+
+# Enhanced CLI features
+tabulate==0.9.0
+questionary==2.0.1
+colorama==0.4.6
+
+# Configuration management
+python-decouple==3.8
+environs==11.0.0
+
+# Advanced deployment features
+paramiko==3.4.0  # SSH connections
+fabric==3.2.2  # Remote execution
+ansible-runner==2.4.0  # Ansible integration (optional)
+
+# API documentation
+flasgger==0.9.7.1
+apispec==6.6.1
+marshmallow==3.21.3
+
+# Testing utilities for Phase 2 features
+aioresponses==0.7.6  # Mock async HTTP requests
+faker==25.8.0  # Generate test data
+factory-boy==3.3.0  # Test fixtures
+httpretty==1.1.4  # HTTP request mocking
+
+# Performance testing
+locust==2.29.1  # Load testing
+memory-profiler==0.61.0  # Memory profiling
+
+# Deployment validation
+jsonschema==4.22.0  # Config validation
+cerberus==1.3.5  # Data validation
+voluptuous==0.15.2  # Schema validation
+
+# Distributed tracing (optional)
+jaeger-client==4.8.0
+py-zipkin==1.2.8
+
+# Feature flags (optional)
+python-feature-flag==1.1.0
+ldclient-py==9.5.0  # LaunchDarkly client
+
+# Rate limiting
+aioredis==2.0.1
+aiolimiter==1.1.0
+
+# Circuit breaker pattern
+py-breaker==0.7.0
+pybreaker==1.2.0

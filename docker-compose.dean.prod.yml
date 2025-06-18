@@ -1,0 +1,222 @@
+version: '3.8'
+
+services:
+  # PostgreSQL with production configurations
+  postgres:
+    image: postgres:15-alpine
+    container_name: dean-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: agent_evolution
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_SHARED_BUFFERS: 256MB
+    volumes:
+      - dean-postgres-data:/var/lib/postgresql/data
+      - ./init/dean_init.sql:/docker-entrypoint-initdb.d/01_dean_init.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agent_evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dean-network
+
+  # Redis with production configurations
+  redis:
+    image: redis:7-alpine
+    container_name: dean-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - dean-redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dean-network
+
+  # DEAN API Service with production configurations
+  dean-api:
+    build:
+      context: ./services/dean_api
+      dockerfile: Dockerfile
+    container_name: dean-api
+    environment:
+      DATABASE_URL: postgresql://dean_api:dean_api_password@postgres:5432/agent_evolution
+      REDIS_URL: redis://redis:6379
+      WORKTREE_BASE_PATH: /app/worktrees
+      GLOBAL_TOKEN_BUDGET: "1000000"
+      MIN_DIVERSITY_THRESHOLD: "0.3"
+      PYTHONPATH: /app:/app/IndexAgent
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8091:8091"
+    volumes:
+      - dean-worktrees:/app/worktrees
+      - dean-patterns:/app/patterns
+      - dean-repositories:/app/repositories
+      - ../../IndexAgent:/app/IndexAgent:ro
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - dean-network
+
+  # Airflow Webserver with production configurations
+  airflow-webserver:
+    image: apache/airflow:2.5.3-python3.8
+    container_name: dean-airflow-webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'jYxpwlwAXRNueOR-dtjsCeq6S2lcD7jok2bekLHPcVw='
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+      AIRFLOW__CORE__PARALLELISM: 32
+      AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG: 4
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'false'
+    volumes:
+      - ../../airflow-hub/dags:/opt/airflow/dags
+      - ../../airflow-hub/plugins:/opt/airflow/plugins
+      - dean-airflow-logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dean-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: webserver
+    networks:
+      - dean-network
+
+  # Airflow Scheduler with production configurations
+  airflow-scheduler:
+    image: apache/airflow:2.5.3-python3.8
+    container_name: dean-airflow-scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'jYxpwlwAXRNueOR-dtjsCeq6S2lcD7jok2bekLHPcVw='
+      AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 60
+      AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 300
+    volumes:
+      - ../../airflow-hub/dags:/opt/airflow/dags
+      - ../../airflow-hub/plugins:/opt/airflow/plugins
+      - dean-airflow-logs:/opt/airflow/logs
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '1.0'
+          memory: 1G
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    command: scheduler
+    networks:
+      - dean-network
+
+  # Prometheus for monitoring
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dean-prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/dean_alerts.yml:/etc/prometheus/alerts.yml:ro
+      - dean-prometheus-data:/prometheus
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - dean-network
+
+volumes:
+  dean-postgres-data:
+  dean-redis-data:
+  dean-worktrees:
+  dean-patterns:
+  dean-repositories:
+  dean-airflow-logs:
+  dean-prometheus-data:
+
+networks:
+  dean-network:
+    driver: bridge

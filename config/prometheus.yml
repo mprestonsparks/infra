@@ -1,0 +1,43 @@
+# Prometheus configuration for DEAN system monitoring
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # IndexAgent API metrics
+  - job_name: 'indexagent-api'
+    static_configs:
+      - targets: ['indexagent:8081']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Evolution API metrics
+  - job_name: 'evolution-api'
+    static_configs:
+      - targets: ['dean-evolution-api:8090']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Airflow metrics
+  - job_name: 'airflow'
+    static_configs:
+      - targets: ['airflow-webserver:8080']
+    metrics_path: '/admin/metrics'
+    scrape_interval: 60s
+
+  # PostgreSQL metrics (if postgres_exporter is available)
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['dean-postgres:5432']
+    scrape_interval: 30s
+
+  # Redis metrics (if redis_exporter is available)
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['dean-redis:6380']
+    scrape_interval: 30s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']

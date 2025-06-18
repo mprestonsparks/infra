@@ -1,54 +1,35 @@
-# DEAN Agent Evolution Service Dockerfile
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
-
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git \
     curl \
-    build-essential \
+    git \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Copy requirements
+COPY requirements.txt requirements-phase2.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-phase2.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy source code
+# Copy application code
 COPY src/ ./src/
-COPY main.py .
-COPY __init__.py .
-
-# Copy configuration and scripts
-COPY config/ ./config/
 COPY scripts/ ./scripts/
+COPY api/ ./api/
 
 # Create necessary directories
-RUN mkdir -p /app/data /app/logs /app/tmp
+RUN mkdir -p /app/data /app/logs /app/static
 
-# Set up git configuration (required for git operations)
-RUN git config --global user.email "dean-service@example.com" && \
-    git config --global user.name "DEAN Service"
+# Copy static files for web interface
+COPY src/web/static/ /app/static/
 
-# Create non-root user for security
-RUN useradd --create-home --shell /bin/bash dean
-RUN chown -R dean:dean /app
-USER dean
+# Environment variables
+ENV PYTHONPATH=/app:$PYTHONPATH
+ENV DEAN_MODULE_PATH=/app
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+# Expose ports
+EXPOSE 8090 8091
 
-# Expose port
-EXPOSE 8000
-
-# Command to run the application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Default command - can be overridden
+CMD ["python", "-m", "src.web.control_interface"]

@@ -1,0 +1,160 @@
+groups:
+  - name: dean_system_alerts
+    interval: 30s
+    rules:
+      # Container Health Alerts
+      - alert: DEANContainerDown
+        expr: up{job="dean-containers"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          system: dean
+        annotations:
+          summary: "DEAN container {{ $labels.instance }} is down"
+          description: "Container {{ $labels.instance }} has been down for more than 2 minutes"
+
+      - alert: DEANAPIUnhealthy
+        expr: probe_success{job="dean-api-health"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          system: dean
+        annotations:
+          summary: "DEAN API is unhealthy"
+          description: "DEAN API health check has been failing for more than 5 minutes"
+
+      # Resource Usage Alerts
+      - alert: DEANHighMemoryUsage
+        expr: container_memory_usage_bytes{name=~"dean-.*"} / container_spec_memory_limit_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "High memory usage in {{ $labels.name }}"
+          description: "Container {{ $labels.name }} memory usage is above 90% (current: {{ $value | humanizePercentage }})"
+
+      - alert: DEANCriticalMemoryUsage
+        expr: container_memory_usage_bytes{name=~"dean-.*"} / container_spec_memory_limit_bytes > 0.95
+        for: 2m
+        labels:
+          severity: critical
+          system: dean
+        annotations:
+          summary: "Critical memory usage in {{ $labels.name }}"
+          description: "Container {{ $labels.name }} memory usage is above 95% (current: {{ $value | humanizePercentage }})"
+
+      - alert: DEANHighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total{name=~"dean-.*"}[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "High CPU usage in {{ $labels.name }}"
+          description: "Container {{ $labels.name }} CPU usage is above 80% (current: {{ $value | printf \"%.2f\" }}%)"
+
+      # Disk Space Alerts
+      - alert: DEANLowDiskSpace
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.2
+        for: 5m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "Low disk space on DEAN system"
+          description: "Available disk space is below 20% (current: {{ $value | humanizePercentage }})"
+
+      - alert: DEANCriticalDiskSpace
+        expr: node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} < 0.1
+        for: 2m
+        labels:
+          severity: critical
+          system: dean
+        annotations:
+          summary: "Critical disk space on DEAN system"
+          description: "Available disk space is below 10% (current: {{ $value | humanizePercentage }})"
+
+      # Database Alerts
+      - alert: DEANDatabaseConnectionsHigh
+        expr: pg_stat_database_numbackends{datname="agent_evolution"} > 150
+        for: 5m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "High number of database connections"
+          description: "Database connections to agent_evolution exceed 150 (current: {{ $value }})"
+
+      - alert: DEANDatabaseSlowQueries
+        expr: rate(pg_stat_statements_mean_exec_time{datname="agent_evolution"}[5m]) > 1000
+        for: 10m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "Slow database queries detected"
+          description: "Average query execution time exceeds 1000ms"
+
+      # Agent Evolution Alerts
+      - alert: DEANAgentFailureRate
+        expr: rate(dean_agent_failures_total[15m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "High agent failure rate"
+          description: "Agent failure rate exceeds 10% over 15 minutes (current: {{ $value | humanizePercentage }})"
+
+      - alert: DEANEvolutionStalled
+        expr: increase(dean_evolution_cycles_total[1h]) == 0
+        for: 2h
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "Evolution cycles stalled"
+          description: "No evolution cycles completed in the last 2 hours"
+
+      - alert: DEANTokenBudgetExhausted
+        expr: dean_global_tokens_remaining / dean_global_token_budget < 0.1
+        for: 10m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "Token budget nearly exhausted"
+          description: "Less than 10% of global token budget remaining (current: {{ $value | humanizePercentage }})"
+
+      # Airflow Alerts
+      - alert: DEANAirflowSchedulerDown
+        expr: up{job="airflow-scheduler"} == 0
+        for: 5m
+        labels:
+          severity: critical
+          system: dean
+        annotations:
+          summary: "Airflow scheduler is down"
+          description: "Airflow scheduler has been down for more than 5 minutes"
+
+      - alert: DEANAirflowDAGFailures
+        expr: increase(airflow_dag_processing_failures[30m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "Multiple Airflow DAG failures"
+          description: "More than 5 DAG processing failures in the last 30 minutes"
+
+      # Backup Alerts
+      - alert: DEANBackupMissing
+        expr: time() - dean_last_backup_timestamp > 86400 * 2
+        for: 1h
+        labels:
+          severity: warning
+          system: dean
+        annotations:
+          summary: "DEAN backup is overdue"
+          description: "No backup completed in the last 2 days"

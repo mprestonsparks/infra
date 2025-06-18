@@ -1,0 +1,63 @@
+# DEAN API Requirements
+# Real dependencies for production system
+
+# Core web framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Database
+sqlalchemy==2.0.25
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+alembic==1.13.1
+
+# Redis
+redis==5.0.1
+aioredis==2.0.1
+
+# WebSocket support
+websockets==12.0
+python-socketio==5.11.0
+
+# HTTP client
+httpx==0.26.0
+aiohttp==3.9.1
+
+# Monitoring and metrics
+prometheus-client==0.19.0
+opentelemetry-api==1.22.0
+opentelemetry-sdk==1.22.0
+opentelemetry-instrumentation-fastapi==0.43b0
+
+# Git operations
+GitPython==3.1.41
+
+# Utilities
+python-dotenv==1.0.0
+python-multipart==0.0.6
+email-validator==2.1.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# Logging
+structlog==24.1.0
+python-json-logger==2.0.7
+
+# Testing (optional, for development)
+pytest==7.4.4
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+httpx==0.26.0
+
+# Data processing
+numpy==1.26.3
+pandas==2.1.4
+
+# Task queue (for background tasks)
+celery==5.3.4
+flower==2.0.1
+
+# APM and tracing
+sentry-sdk[fastapi]==1.39.2

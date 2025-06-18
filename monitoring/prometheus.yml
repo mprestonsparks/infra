@@ -1,0 +1,82 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'dean-production'
+    env: 'production'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+          # - alertmanager:9093
+
+# Load rules
+rule_files:
+  - "alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # DEAN API metrics
+  - job_name: 'dean-api'
+    static_configs:
+      - targets: ['dean-api:8091']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+
+  # Container metrics via cAdvisor
+  - job_name: 'dean-containers'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    relabel_configs:
+      - source_labels: [__name__]
+        regex: 'container_.*'
+        action: keep
+
+  # PostgreSQL metrics via postgres_exporter
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+  # Redis metrics via redis_exporter
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+
+  # Airflow metrics
+  - job_name: 'airflow-webserver'
+    static_configs:
+      - targets: ['dean-airflow-webserver:8080']
+    metrics_path: '/admin/metrics'
+
+  - job_name: 'airflow-scheduler'
+    static_configs:
+      - targets: ['dean-airflow-scheduler:8793']
+    metrics_path: '/metrics'
+
+  # Health checks
+  - job_name: 'dean-api-health'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          - http://dean-api:8091/health
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # Node exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
