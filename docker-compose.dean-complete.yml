@@ -1,0 +1,352 @@
+version: '3.8'
+
+# DEAN System Docker Compose Configuration - COMPLETE
+# Includes DEAN Orchestrator and IndexAgent services
+
+services:
+  # PostgreSQL Database with agent_evolution schema
+  postgres:
+    image: postgres:15-alpine
+    container_name: dean-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agent_evolution
+    ports:
+      - "5432:5432"
+    volumes:
+      - dean-postgres-data:/var/lib/postgresql/data
+      - ./database/dean_schema_complete.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./database/init_agent_evolution.sql:/docker-entrypoint-initdb.d/02-init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agent_evolution"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dean-network
+
+  # Redis for caching and agent registry
+  redis:
+    image: redis:7-alpine
+    container_name: dean-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - dean-redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dean-network
+
+  # DEAN Orchestrator Service (NEW)
+  dean-orchestrator:
+    build:
+      context: ../DEAN
+      dockerfile: Dockerfile
+    container_name: dean-orchestrator
+    environment:
+      # Database
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agent_evolution
+      DEAN_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agent_evolution
+      # Redis
+      REDIS_URL: redis://redis:6379
+      # Service URLs
+      INDEXAGENT_URL: http://indexagent:8081
+      AIRFLOW_URL: http://airflow-webserver:8080
+      EVOLUTION_API_URL: http://dean-api:8091
+      # Auth
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-secret-key-change-in-production}
+      DEAN_SERVICE_API_KEY: ${DEAN_SERVICE_API_KEY:-dean-service-key}
+      # Server config
+      DEAN_SERVER_HOST: 0.0.0.0
+      DEAN_SERVER_PORT: 8082
+      DEAN_ENV: production
+      DEAN_LOG_LEVEL: INFO
+      # CORS
+      CORS_ORIGINS: "*"
+      ALLOWED_HOSTS: "*"
+    ports:
+      - "8082:8082"
+      - "8083:8083"  # Web dashboard port
+    volumes:
+      - ../DEAN/configs:/app/configs:ro
+      - dean-logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 40s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - dean-network
+
+  # IndexAgent Service (NEW)
+  indexagent:
+    build:
+      context: ../IndexAgent
+      dockerfile: Dockerfile
+    container_name: indexagent
+    environment:
+      # Database
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agent_evolution
+      AGENT_EVOLUTION_DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agent_evolution
+      # Redis
+      REDIS_URL: redis://redis:6379
+      # API config
+      API_HOST: 0.0.0.0
+      API_PORT: 8081
+      # Claude
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY}
+      # Agent config
+      AGENT_TOKEN_LIMIT: 4096
+      MIN_DIVERSITY_THRESHOLD: 0.3
+      # Paths
+      WORKTREE_BASE_PATH: /app/worktrees
+      PATTERN_STORAGE_PATH: /app/patterns
+      # Python
+      PYTHONPATH: /app
+      PYTHONDONTWRITEBYTECODE: 1
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "8081:8081"
+    volumes:
+      - dean-worktrees:/app/worktrees
+      - dean-patterns:/app/patterns
+      - indexagent-logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # For git operations
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - dean-network
+
+  # DEAN API Service (Economic Governor)
+  dean-api:
+    build:
+      context: ./services/dean_api
+      dockerfile: Dockerfile
+    container_name: dean-api
+    environment:
+      DATABASE_URL: postgresql://dean_api:dean_api_password@postgres:5432/agent_evolution
+      REDIS_URL: redis://redis:6379
+      WORKTREE_BASE_PATH: /app/worktrees
+      GLOBAL_TOKEN_BUDGET: "1000000"
+      MIN_DIVERSITY_THRESHOLD: "0.3"
+      PYTHONPATH: /app
+    ports:
+      - "8091:8091"
+    volumes:
+      - dean-worktrees:/app/worktrees
+      - dean-patterns:/app/patterns
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - dean-network
+
+  # Apache Airflow for workflow orchestration
+  airflow-webserver:
+    image: apache/airflow:2.8.0
+    container_name: dean-airflow-webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'jYxpwlwAXRNueOR-dtjsCeq6S2lcD7jok2bekLHPcVw='
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.basic_auth'
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: 'true'
+      # Service URLs
+      DEAN_API_URL: http://dean-api:8091
+      DEAN_ORCHESTRATOR_URL: http://dean-orchestrator:8082
+      INDEXAGENT_URL: http://indexagent:8081
+      # Python path for imports
+      PYTHONPATH: /opt/airflow/dags:/opt/airflow/plugins
+    volumes:
+      - ../airflow-hub/dags:/opt/airflow/dags
+      - ../airflow-hub/logs:/opt/airflow/logs
+      - ../airflow-hub/plugins:/opt/airflow/plugins
+      - ./airflow/requirements.txt:/requirements.txt
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "pip install -r /requirements.txt && airflow webserver"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dean-orchestrator:
+        condition: service_healthy
+      indexagent:
+        condition: service_healthy
+      dean-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - dean-network
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.0
+    container_name: dean-airflow-scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'jYxpwlwAXRNueOR-dtjsCeq6S2lcD7jok2bekLHPcVw='
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+      AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+      # Service URLs
+      DEAN_API_URL: http://dean-api:8091
+      DEAN_ORCHESTRATOR_URL: http://dean-orchestrator:8082
+      INDEXAGENT_URL: http://indexagent:8081
+      # Python path for imports
+      PYTHONPATH: /opt/airflow/dags:/opt/airflow/plugins
+    volumes:
+      - ../airflow-hub/dags:/opt/airflow/dags
+      - ../airflow-hub/logs:/opt/airflow/logs
+      - ../airflow-hub/plugins:/opt/airflow/plugins
+      - ./airflow/requirements.txt:/requirements.txt
+    command: >
+      bash -c "pip install -r /requirements.txt && airflow scheduler"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dean-orchestrator:
+        condition: service_healthy
+      indexagent:
+        condition: service_healthy
+      dean-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - dean-network
+
+  airflow-init:
+    image: apache/airflow:2.8.0
+    container_name: dean-airflow-init
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+      AIRFLOW__CORE__FERNET_KEY: 'jYxpwlwAXRNueOR-dtjsCeq6S2lcD7jok2bekLHPcVw='
+      _AIRFLOW_DB_UPGRADE: 'true'
+      _AIRFLOW_WWW_USER_CREATE: 'true'
+      _AIRFLOW_WWW_USER_USERNAME: 'admin'
+      _AIRFLOW_WWW_USER_PASSWORD: 'admin'
+    volumes:
+      - ../../airflow-hub/dags:/opt/airflow/dags
+      - ./airflow/requirements.txt:/requirements.txt
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install -r /requirements.txt &&
+        airflow db init &&
+        airflow db upgrade &&
+        airflow users create --username admin --firstname DEAN --lastname System --role Admin --email dean@example.com --password admin || true &&
+        airflow connections add dean_api --conn-type http --conn-host dean-api --conn-port 8091 || true &&
+        airflow connections add dean_orchestrator --conn-type http --conn-host dean-orchestrator --conn-port 8082 || true &&
+        airflow connections add indexagent --conn-type http --conn-host indexagent --conn-port 8081 || true &&
+        airflow connections add dean_postgres --conn-type postgres --conn-host postgres --conn-port 5432 --conn-schema agent_evolution --conn-login postgres --conn-password postgres || true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - dean-network
+
+  # DEAN Dashboard
+  dean-dashboard:
+    image: nginx:alpine
+    container_name: dean-dashboard
+    volumes:
+      - ../dean_dashboard_real.html:/usr/share/nginx/html/index.html:ro
+      - ./nginx/dean-dashboard.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8092:80"
+    depends_on:
+      - dean-orchestrator
+      - dean-api
+      - indexagent
+    networks:
+      - dean-network
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: dean-prometheus
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - dean-prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - dean-network
+
+  # Grafana for metrics visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: dean-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    volumes:
+      - dean-grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - dean-network
+
+volumes:
+  dean-postgres-data:
+  dean-redis-data:
+  dean-worktrees:
+  dean-patterns:
+  dean-prometheus-data:
+  dean-grafana-data:
+  dean-logs:
+  indexagent-logs:
+
+networks:
+  dean-network:
+    driver: bridge

@@ -8,13 +8,14 @@ This document specifies the requirements for the Distributed Evolutionary Agent 
 
 ### 1.2 Scope
 
-The system will integrate with the existing infrastructure across three repositories:
+The system will integrate with the existing infrastructure across four repositories:
 
+- **DEAN**: Primary orchestration layer providing unified control, authentication, and monitoring via `DEAN/src/`
 - **infra**: Infrastructure orchestration via `infra/modules/agent-evolution/`
 - **airflow-hub**: Workflow management via `airflow-hub/dags/agent_evolution/`
 - **IndexAgent**: Core logic via `IndexAgent/indexagent/agents/`
 
-The system will enable parallel execution of multiple AI agents with strict economic constraints, automatically optimize agent behavior through recursive evolution while maintaining genetic diversity, provide scalable code maintenance across multiple repositories, capture and leverage emergent behaviors for continuous improvement, and maintain a queryable knowledge repository for meta-learning.
+The system will enable parallel execution of multiple AI agents with strict economic constraints through DEAN orchestration, automatically optimize agent behavior through recursive evolution while maintaining genetic diversity, provide scalable code maintenance across multiple repositories with unified monitoring, capture and leverage emergent behaviors for continuous improvement via coordinated services, and maintain a queryable knowledge repository for meta-learning accessible through DEAN's unified API.
 
 ## 2. Functional Requirements
 
@@ -57,13 +58,33 @@ The system will enable parallel execution of multiple AI agents with strict econ
 - FR-026: The system SHALL support cross-domain pattern import via `infra/modules/agent-evolution/scripts/import-patterns.py`
 - FR-027: The system SHALL track pattern effectiveness in `agent_evolution.discovered_patterns` table
 
-### 2.5 Integration Requirements
+### 2.5 DEAN Orchestration Requirements
 
-- FR-028: The system SHALL integrate with Apache Airflow 3.0.0 for orchestration via custom operators in `airflow-hub/plugins/agent_evolution/`
-- FR-029: The system SHALL use Claude Code CLI for code modifications integrated through Docker service
-- FR-030: The system SHALL create pull requests for successful improvements via GitHub API integration
-- FR-031: The system SHALL support Docker Compose deployment via `infra/docker-compose.yml` modifications
-- FR-032: The system SHALL provide queryable access to the knowledge repository via FastAPI endpoints at `http://agent-evolution:8080/api/v1`
+- FR-028: The DEAN orchestration server SHALL provide a unified API endpoint at `http://dean-server:8082/api/v1` for all system operations
+- FR-029: DEAN SHALL authenticate all user requests using JWT tokens with configurable expiration via `DEAN_TOKEN_EXPIRY`
+- FR-030: DEAN SHALL provide service-to-service authentication tokens for secure inter-service communication
+- FR-031: DEAN SHALL coordinate evolution trials across IndexAgent, Airflow, and Evolution API services
+- FR-032: DEAN SHALL aggregate health status from all registered services every 30 seconds
+- FR-033: DEAN SHALL provide real-time evolution monitoring via WebSocket connections at `/ws/evolution/{trial_id}`
+- FR-034: DEAN SHALL maintain a service registry with automatic failover capabilities
+- FR-035: DEAN SHALL execute multi-service workflows with transactional semantics
+- FR-036: DEAN SHALL provide a CLI interface (`dean-cli`) for system control and monitoring
+- FR-037: DEAN SHALL offer a web dashboard on port 8083 for visual system monitoring
+- FR-038: DEAN SHALL implement circuit breakers for all service connections with configurable thresholds
+- FR-039: DEAN SHALL log all orchestration decisions to an audit trail in `dean.orchestration_log`
+- FR-040: DEAN SHALL support batch operations for managing multiple evolution trials
+- FR-041: DEAN SHALL enforce global resource limits across all services
+- FR-042: DEAN SHALL provide service discovery mechanisms for dynamic service registration
+
+### 2.6 Integration Requirements
+
+- FR-043: The system SHALL integrate with Apache Airflow 3.0.0 for task orchestration via custom operators in `airflow-hub/plugins/agent_evolution/`
+- FR-044: The system SHALL use Claude Code CLI for code modifications integrated through Docker service
+- FR-045: The system SHALL create pull requests for successful improvements via GitHub API integration
+- FR-046: The system SHALL support Docker Compose deployment via `infra/docker-compose.yml` modifications
+- FR-047: The system SHALL provide queryable access to the knowledge repository via DEAN's unified API
+- FR-048: All service integrations SHALL authenticate through DEAN's authentication layer
+- FR-049: Service endpoints SHALL be configurable via DEAN's service registry
 
 ## 3. Non-Functional Requirements
 
@@ -74,30 +95,43 @@ The system will enable parallel execution of multiple AI agents with strict econ
 - NFR-003: The system SHALL scale linearly with available CPU cores up to 16 cores
 - NFR-004: The system SHALL optimize for token efficiency maintaining below 1000 tokens per meaningful change
 - NFR-005: Pattern detection SHALL complete within 5 seconds using indexed PostgreSQL queries
+- NFR-006: DEAN orchestration API SHALL respond to requests within 200ms for cached operations
+- NFR-007: DEAN SHALL handle at least 100 concurrent WebSocket connections for monitoring
+- NFR-008: Service health checks SHALL complete within 5 seconds across all registered services
 
 ### 3.2 Security
 
-- NFR-006: Agents SHALL only modify code within assigned worktrees enforced by Docker volume mounts
-- NFR-007: The system SHALL enforce token budget limits through API middleware and database constraints
-- NFR-008: All agent actions SHALL be auditable via PostgreSQL `agent_evolution.audit_log` table
-- NFR-009: The system SHALL prevent agents from modifying safety constraints through immutable configuration
-- NFR-010: The system SHALL isolate agent execution environments using Docker network isolation
+- NFR-009: Agents SHALL only modify code within assigned worktrees enforced by Docker volume mounts
+- NFR-010: The system SHALL enforce token budget limits through API middleware and database constraints
+- NFR-011: All agent actions SHALL be auditable via PostgreSQL `agent_evolution.audit_log` table
+- NFR-012: The system SHALL prevent agents from modifying safety constraints through immutable configuration
+- NFR-013: The system SHALL isolate agent execution environments using Docker network isolation
+- NFR-014: DEAN SHALL enforce authentication on all API endpoints using JWT tokens
+- NFR-015: DEAN SHALL implement role-based access control for administrative operations
+- NFR-016: Service-to-service communication SHALL use time-limited authentication tokens
+- NFR-017: DEAN SHALL log all authentication attempts and authorization decisions
 
 ### 3.3 Reliability
 
-- NFR-011: Failed agents SHALL not affect other running agents through container isolation
-- NFR-012: The system SHALL automatically clean up orphaned worktrees via `infra/modules/agent-evolution/scripts/cleanup-worktrees.sh`
-- NFR-013: The system SHALL recover from partial failures using Airflow retry mechanisms
-- NFR-014: The system SHALL maintain diversity even under failure conditions through forced mutation injection
-- NFR-015: The system SHALL preserve pattern library integrity through database transactions and backups
+- NFR-018: Failed agents SHALL not affect other running agents through container isolation
+- NFR-019: The system SHALL automatically clean up orphaned worktrees via `infra/modules/agent-evolution/scripts/cleanup-worktrees.sh`
+- NFR-020: The system SHALL recover from partial failures using Airflow retry mechanisms
+- NFR-021: The system SHALL maintain diversity even under failure conditions through forced mutation injection
+- NFR-022: The system SHALL preserve pattern library integrity through database transactions and backups
+- NFR-023: DEAN SHALL implement circuit breakers to prevent cascading service failures
+- NFR-024: DEAN SHALL maintain service operation logs for post-mortem analysis
+- NFR-025: DEAN SHALL support graceful degradation when individual services are unavailable
 
 ### 3.4 Observability
 
-- NFR-016: The system SHALL provide real-time metrics on token consumption via Prometheus at `http://agent-evolution:8080/metrics`
-- NFR-017: The system SHALL track diversity variance continuously in Grafana dashboards
-- NFR-018: The system SHALL log all pattern discoveries to structured logs in JSON format
-- NFR-019: The system SHALL enable historical trend analysis through PostgreSQL time-series queries
-- NFR-020: The system SHALL support complex analytical queries via indexed database views
+- NFR-026: The system SHALL provide real-time metrics on token consumption via Prometheus exposed through DEAN
+- NFR-027: The system SHALL track diversity variance continuously in unified DEAN dashboards
+- NFR-028: The system SHALL log all pattern discoveries to structured logs in JSON format
+- NFR-029: The system SHALL enable historical trend analysis through PostgreSQL time-series queries
+- NFR-030: The system SHALL support complex analytical queries via indexed database views
+- NFR-031: DEAN SHALL provide unified logging aggregation across all services
+- NFR-032: DEAN SHALL expose consolidated metrics endpoint for all system components
+- NFR-033: DEAN SHALL support distributed tracing for multi-service operations
 
 ## 4. Technical Specifications
 

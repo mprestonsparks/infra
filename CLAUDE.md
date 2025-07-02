@@ -2,12 +2,64 @@
 
 This file provides repository-specific guidance for infrastructure and services.
 
+## Review Report Requirements
+
+<review-report-standards>
+When creating review reports for completed tasks, Claude Code MUST follow these standards:
+
+1. **Naming Convention**: 
+   - XML format: `REVIEW_REPORT_YYYY-MM-DD-HHMM_XML.md`
+   - Markdown format: `REVIEW_REPORT_YYYY-MM-DD-HHMM_MD.md`
+   - Example: `REVIEW_REPORT_2025-06-27-1452_XML.md` and `REVIEW_REPORT_2025-06-27-1452_MD.md`
+   - Time should be in 24-hour format (e.g., 1452 for 2:52 PM)
+
+2. **Dual Format Requirement**:
+   - Always create TWO versions of each review report
+   - XML version: Use XML syntax throughout for structured data
+   - Markdown version: Use standard markdown formatting for readability
+   - Both must contain identical information, only formatting differs
+
+3. **Storage Location**:
+   - All review reports MUST be saved in: `.claude/review-reports/`
+   - Create the directory if it doesn't exist: `mkdir -p .claude/review-reports`
+   - This applies to ALL repositories in the DEAN system
+
+4. **Required Metadata**:
+   Each review report MUST include metadata at the top:
+   ```xml
+   <report-metadata>
+     <creation-date>YYYY-MM-DD</creation-date>
+     <creation-time>HH:MM PST/EST</creation-time>
+     <report-type>Implementation Review/Bug Fix/Feature Addition/etc.</report-type>
+     <author>Claude Code Assistant</author>
+     <system>DEAN</system>
+     <component>Component Name</component>
+     <task-id>Unique Task Identifier</task-id>
+   </report-metadata>
+   ```
+</review-report-standards>
+
 ## Repository Purpose
 This repository provides infrastructure and shared services:
 - Docker Compose configurations
 - Database schemas and migrations
 - API services (Economic Governor, etc.)
 - Deployment scripts and utilities
+
+## CRITICAL: This is Part of a Distributed System
+
+<distributed_system_warning>
+⚠️ **WARNING: The DEAN system spans FOUR repositories** ⚠️
+
+This repository contains ONLY the infrastructure and deployment configurations. Other components are located in:
+- **DEAN**: Orchestration, authentication, monitoring (Port 8082-8083)
+- **IndexAgent**: Agent logic, evolution algorithms (Port 8081)
+- **airflow-hub**: DAGs, operators, workflow orchestration (Port 8080)
+
+**Specification Documents Location**: DEAN/specifications/ (read-only)
+
+Always check all repositories before implementing features!
+</distributed_system_warning>
 
 ## Critical Implementation Requirements
 
@@ -27,6 +79,42 @@ Every implementation in this project MUST:
 - Work with actual services and dependencies
 - Be tested with real commands showing actual output
 - Include complete implementations of all code paths
+
+## Key Components in This Repository
+
+### DEAN-Related Infrastructure
+```
+# Docker Configurations
+docker-compose.dean.yml           # Main DEAN deployment
+docker-compose.dean.prod.yml      # Production configuration
+docker-compose.dean-complete.yml  # Complete system setup
+
+# Database
+database/init_agent_evolution.sql # Complete agent_evolution schema
+database/dean_schema_complete.sql # Additional schema definitions
+
+# Services
+services/dean_api/               # Evolution API implementation
+services/economy/                # Economic governor service
+services/evolution/              # Evolution support services
+
+# Modules
+modules/agent-evolution/         # Agent evolution module
+  ├── docker/                   # Docker configurations
+  ├── config/                   # Service configurations
+  ├── monitoring/               # Grafana dashboards
+  └── scripts/                  # Deployment scripts
+
+# Monitoring
+monitoring/prometheus.yml        # Prometheus configuration
+monitoring/dean_alerts.yml       # DEAN alert rules
+```
+
+### What This Repository Does NOT Contain
+- **Agent Implementation**: Located in IndexAgent/indexagent/agents/
+- **Orchestration Logic**: Located in DEAN/src/dean_orchestration/
+- **DAG Definitions**: Located in airflow-hub/dags/dean/
+- **Agent CLI**: Located in DEAN/src/interfaces/cli/
 
 ## Infrastructure-Specific Guidelines
 

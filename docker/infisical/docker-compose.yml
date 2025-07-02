@@ -1,0 +1,90 @@
+version: '3.8'
+
+services:
+  infisical-postgres:
+    image: postgres:15-alpine
+    container_name: infisical-postgres
+    environment:
+      - POSTGRES_USER=infisical
+      - POSTGRES_PASSWORD=inf1s1c@l_s3cur3_p@ss
+      - POSTGRES_DB=infisical
+    volumes:
+      - infisical-postgres-data:/var/lib/postgresql/data
+    networks:
+      - infisical-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U infisical"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  infisical-redis:
+    image: redis:7-alpine
+    container_name: infisical-redis
+    command: redis-server --requirepass r3d1s_1nf1s1c@l_p@ss
+    volumes:
+      - infisical-redis-data:/data
+    networks:
+      - infisical-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "r3d1s_1nf1s1c@l_p@ss", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  infisical:
+    image: infisical/infisical:latest
+    container_name: infisical
+    depends_on:
+      infisical-postgres:
+        condition: service_healthy
+      infisical-redis:
+        condition: service_healthy
+    ports:
+      - "8090:8080"
+    environment:
+      # Try multiple PostgreSQL connection string formats
+      - DATABASE_URL=postgresql://infisical:inf1s1c@l_s3cur3_p@ss@infisical-postgres:5432/infisical
+      - DB_CONNECTION_URI=postgresql://infisical:inf1s1c@l_s3cur3_p@ss@infisical-postgres:5432/infisical
+      - POSTGRES_URL=postgresql://infisical:inf1s1c@l_s3cur3_p@ss@infisical-postgres:5432/infisical
+      - POSTGRES_CONNECTION_URL=postgresql://infisical:inf1s1c@l_s3cur3_p@ss@infisical-postgres:5432/infisical
+      
+      # Specify database type
+      - DB_TYPE=postgres
+      - DATABASE_TYPE=postgres
+      
+      # Redis configuration
+      - REDIS_URL=redis://:r3d1s_1nf1s1c@l_p@ss@infisical-redis:6379
+      
+      # Security keys
+      - ENCRYPTION_KEY=4f5e6d7c8b9a0e1f2d3c4b5a69788796
+      - AUTH_SECRET=7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w
+      - JWT_SIGNUP_SECRET=7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w
+      - JWT_REFRESH_SECRET=7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w
+      - JWT_AUTH_SECRET=7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w
+      - JWT_SERVICE_SECRET=7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w
+      - JWT_PROVIDER_AUTH_SECRET=7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w
+      
+      # Other settings
+      - TELEMETRY_ENABLED=false
+      - NODE_ENV=production
+      - SITE_URL=http://10.7.0.2:8090
+    networks:
+      - infisical-network
+      - dean-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  infisical-postgres-data:
+  infisical-redis-data:
+
+networks:
+  infisical-network:
+    driver: bridge
+  dean-network:
+    external: true

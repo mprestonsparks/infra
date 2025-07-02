@@ -2,15 +2,106 @@
 
 ## 1. Architecture Overview
 
-The DEAN system follows a distributed, microservices-inspired architecture with autonomous agents operating in parallel across three integrated repositories. The architecture fundamentally incorporates economic constraints, diversity maintenance, and emergent behavior capture as core architectural principles implemented through specific infrastructure components.
+The DEAN system follows a distributed, microservices-inspired architecture with autonomous agents operating in parallel across four integrated repositories. Within the DEAN ecosystem, the DEAN repository serves as the orchestration layer, providing unified control, authentication, and monitoring for DEAN-specific workflows. Each service is designed to function independently, with DEAN providing orchestration when these services are deployed together as the complete DEAN system. The architecture fundamentally incorporates economic constraints, diversity maintenance, and emergent behavior capture as core architectural principles implemented through specific infrastructure components.
 
-## 2. System Architecture
+## 2. Service Independence and Reusability
 
-### 2.1 High-Level Architecture
+### 2.1 Design Principles for Independence
+
+Each service in the DEAN architecture is designed with independence as a core principle:
+
+1. **Self-Contained Functionality**: Each repository provides complete, useful functionality on its own
+   - **airflow-hub**: General-purpose workflow orchestration platform
+   - **IndexAgent**: Code indexing and search service
+   - **infra**: Infrastructure and deployment tools
+
+2. **Loose Coupling via APIs**: Services communicate through well-defined REST APIs
+   - No compile-time dependencies between services
+   - Configuration-based service discovery
+   - Graceful degradation when services unavailable
+
+3. **Configuration Over Code**: Service endpoints and integration points are configurable
+   - No hardcoded service addresses
+   - Environment-specific configuration support
+   - Optional integration points
+
+### 2.2 Using Services Independently
+
+Each service can be deployed and used without the others:
+
+#### airflow-hub Standalone Usage
+```bash
+# Deploy only airflow-hub
+cd airflow-hub
+docker-compose up -d
+
+# Use for any workflow orchestration needs
+# DEAN DAGs are optional - in the dean/ subdirectory
+```
+
+#### IndexAgent Standalone Usage
+```bash
+# Deploy only IndexAgent
+cd IndexAgent
+docker-compose up -d
+
+# Use for code search and indexing
+# No dependency on DEAN orchestration
+```
+
+### 2.3 Integration Patterns
+
+When services are used together, follow these patterns to maintain independence:
+
+#### Good: Configuration-Based Integration
+```python
+# Use Airflow Connections
+conn = BaseHook.get_connection("my_service_api")
+api_url = f"{conn.schema}://{conn.host}:{conn.port}"
+```
+
+#### Bad: Hardcoded Integration
+```python
+# Avoid hardcoded URLs
+api_url = "http://my-service:8080"  # ❌ Creates tight coupling
+```
+
+#### Good: Optional Dependencies
+```python
+# Check if service is available
+try:
+    response = requests.get(f"{api_url}/health")
+    if response.status_code == 200:
+        # Use enhanced features
+except:
+    # Continue with basic functionality
+```
+
+### 2.4 DEAN's Role in the Ecosystem
+
+The DEAN orchestration layer provides value when deploying the complete DEAN system:
+
+1. **Unified Interface**: Single point of interaction for the complete system
+2. **Cross-Service Workflows**: Coordinates complex operations across services
+3. **Centralized Auth**: Optional unified authentication layer
+4. **Aggregated Monitoring**: Consolidated view of all services
+
+However, DEAN is **not required** for:
+- Running Airflow workflows (use airflow-hub directly)
+- Code indexing and search (use IndexAgent directly)
+- Infrastructure deployment (use infra tools directly)
+
+## 3. System Architecture
+
+### 3.1 High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│              Apache Airflow 3.0.0 Orchestration Layer               │
+│           DEAN System Orchestration Layer (Optional)                │
+│                    (DEAN/ - Port 8082)                             │
+│    Provides Unified Control for DEAN System Deployments            │
+├─────────────────────────────────────────────────────────────────────┤
+│              Apache Airflow 3.0.0 Task Orchestration               │
 │                 (airflow-hub/dags/agent_evolution/)                 │
 │                    with Economic Governor                           │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -42,40 +133,96 @@ The DEAN system follows a distributed, microservices-inspired architecture with 
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Repository Integration Architecture
+### 3.2 Repository Integration Architecture
 
 ```
-┌──────────────────────┐     ┌──────────────────────┐   ┌─────────────────────┐
-│      infra/          │     │   airflow-hub/       │   │     IndexAgent/     │
-├──────────────────────┤     ├──────────────────────    ├─────────────────────┤
-│ modules/             │     │ dags/                │   │ indexagent/         |
-│ └─ agent-evolution/  │     │ └─ agent_evolution/  │   │ └─ agents/          │
-│     ├─ docker/       │     │     ├─ *.yaml        │   │     ├─ evolution/   │
-│     ├─ config/       │────▶│     └─ *.py          │──▶│     ├─ patterns/    │
-│     └─ scripts/      │     │                      │   │     └─ economy/     │
-│                      │     │ plugins/             │   │                     │
-│ docker-compose.yml   │     │ └─ agent_evolution/  │   │ src/api/agents.py   │
-└──────────────────────┘     └──────────────────────┘   └─────────────────────┘
-         ▲                            ▲                            ▲
-         │                            │                            │
-         └────────────────────────────┴────────────────────────────┘
-                          Central Configuration via .env
+┌──────────────────────┐
+│       DEAN/          │  Primary Orchestration & User Interface
+├──────────────────────┤
+│ src/                 │
+│ ├─ dean_orchestration│──────┐
+│ ├─ integration/      │      │ Coordinates all services
+│ ├─ interfaces/       │      │
+│ └─ auth/            │      ▼
+└──────────────────────┘  ┌────────────────────────────────────────────┐
+                         │        Service Integration Layer            │
+┌──────────────────────┐  ├────────────────────────────────────────────┤
+│      infra/          │  │  ┌──────────────┐  ┌──────────────────┐    │
+├──────────────────────┤  │  │ airflow-hub/ │  │   IndexAgent/    │    │
+│ modules/             │  │  ├──────────────┤  ├──────────────────┤    │
+│ └─ agent-evolution/  │──┼─▶│ dags/        │  │ indexagent/      │    │
+│     ├─ docker/       │  │  │ └─ agent_    │  │ └─ agents/       │    │
+│     ├─ config/       │  │  │   evolution/ │  │     ├─ evolution/│    │
+│     └─ scripts/      │  │  │              │  │     ├─ patterns/ │    │
+│                      │  │  │ plugins/     │  │     └─ economy/  │    │
+│ docker-compose.yml   │  │  └──────────────┘  └──────────────────┘    │
+└──────────────────────┘  └────────────────────────────────────────────┘
+         ▲                            ▲                      ▲
+         │                            │                      │
+         └────────────────────────────┴──────────────────────┘
+                    Central Configuration via DEAN + .env
 ```
 
-### 2.3 Service Communication Architecture
+### 3.3 Service Communication Architecture
 
 ```yaml
-# Service endpoints for inter-service communication
-INDEXAGENT_API: "http://indexagent:8080/api/v1"
+# Primary orchestration endpoint (all external communication flows through DEAN)
+DEAN_ORCHESTRATION_API: "http://dean-server:8082/api/v1"
+DEAN_WEB_DASHBOARD: "http://dean-server:8083"
+
+# Internal service endpoints (accessed via DEAN orchestration)
+INDEXAGENT_API: "http://indexagent:8081/api/v1"
 AIRFLOW_API: "http://airflow-service:8080/api/v1"
-AGENT_EVOLUTION_API: "http://agent-evolution:8080/api/v1"
+AGENT_EVOLUTION_API: "http://agent-evolution:8090/api/v1"
 AGENT_REGISTRY: "redis://agent-registry:6379"
 DATABASE_URL: "postgresql://postgres:password@postgres:5432/agent_evolution"
+
+# Authentication flow
+User → DEAN (Auth) → Service Authentication → Service Action
 ```
 
-## 3. Component Architecture
+## 4. Component Architecture
 
-### 3.1 Agent Runtime Layer
+### 4.1 DEAN Orchestration Components
+
+The DEAN repository provides the primary orchestration layer with the following key components:
+
+#### 3.1.1 Orchestration Server (`src/dean_orchestration/`)
+- **Main Server**: FastAPI application running on port 8082
+- **WebSocket Support**: Real-time updates and monitoring
+- **Request Routing**: Intelligently routes requests to appropriate services
+- **Health Aggregation**: Collects and reports health status from all services
+
+#### 3.1.2 Authentication System (`src/auth/`)
+- **Unified Authentication**: Single sign-on across all services
+- **Service Authentication**: Inter-service authentication tokens
+- **Role-Based Access Control**: Granular permissions management
+- **JWT Token Management**: Secure token generation and validation
+
+#### 3.1.3 Service Integration Layer (`src/integration/`)
+- **IndexAgent Client**: Manages agent population and pattern detection
+- **Airflow Client**: Triggers and monitors DAG execution
+- **Evolution Client**: Coordinates evolution trials and metrics
+- **Infra Client**: Manages deployment and infrastructure operations
+
+#### 3.1.4 User Interfaces (`src/interfaces/`)
+- **CLI Interface** (`dean-cli`): Command-line tool for system control
+  - Evolution management: `dean-cli evolution start/stop/status`
+  - Service health: `dean-cli service health`
+  - Workflow execution: `dean-cli workflow execute`
+- **Web Dashboard**: Browser-based monitoring and control
+  - Real-time metrics visualization
+  - Service status monitoring
+  - Evolution trial management
+- **REST API**: Programmatic access to all orchestration features
+
+#### 3.1.5 Orchestration Logic (`src/orchestration/`)
+- **Workflow Coordination**: Multi-service workflow execution
+- **Evolution Trial Management**: Complete evolution lifecycle orchestration
+- **Pattern Propagation**: Cross-domain pattern transfer coordination
+- **Resource Management**: Token budget and resource allocation
+
+### 4.2 Agent Runtime Layer
 
 #### Container Architecture
 ```yaml
@@ -210,7 +357,7 @@ Pattern flow implementation:
 5. Import scripts enable cross-domain transfer
 ```
 
-## 4. Data Architecture
+## 5. Data Architecture
 
 ### 4.1 Data Flow Architecture
 
@@ -246,15 +393,45 @@ Pattern flow implementation:
 - **Logs**: JSON structured logs to `/app/logs`
 - **Models**: Persistent volume for trained models
 
-## 5. Deployment Architecture
+## 6. Deployment Architecture
 
 ### 5.1 Docker Compose Architecture
 
 ```yaml
-# infra/docker-compose.yml additions
+# Complete service stack with DEAN orchestration
 version: "3.8"
 
 services:
+  dean-server:
+    build:
+      context: ../DEAN
+      dockerfile: Dockerfile
+    container_name: dean-orchestration
+    ports:
+      - "${DEAN_SERVER_PORT:-8082}:8082"
+      - "${DEAN_WEB_PORT:-8083}:8083"
+    environment:
+      - DEAN_ENV=${DEAN_ENV:-development}
+      - DEAN_SERVICE_API_KEY=${DEAN_SERVICE_API_KEY}
+      - INDEXAGENT_URL=http://indexagent:8081
+      - AIRFLOW_URL=http://airflow-service:8080
+      - EVOLUTION_API_URL=http://agent-evolution:8090
+      - DATABASE_URL=${DEAN_DATABASE_URL}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./DEAN/configs:/app/configs
+      - dean-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - agent-network
+
   agent-evolution:
     build:
       context: ../infra/modules/agent-evolution
@@ -367,7 +544,7 @@ spec:
           periodSeconds: 10
 ```
 
-## 6. Security Architecture
+## 7. Security Architecture
 
 ### 6.1 Network Security
 
@@ -426,7 +603,7 @@ volumes:
   - ./worktrees:/worktrees:rw  # Read-write for agent worktrees
 ```
 
-## 7. Scalability Architecture
+## 8. Scalability Architecture
 
 ### 7.1 Horizontal Scaling
 
@@ -467,7 +644,7 @@ class ResourceManager:
         }
 ```
 
-## 8. Monitoring Architecture
+## 9. Monitoring Architecture
 
 ### 8.1 Metrics Collection
 
@@ -527,7 +704,7 @@ OTEL_SERVICE_NAME: "dean-agent-evolution"
 OTEL_TRACES_EXPORTER: "otlp"
 ```
 
-## 9. Integration Points
+## 10. Integration Points
 
 ### 9.1 Repository Integration Matrix
 
@@ -555,9 +732,114 @@ SERVICE_URLS = {
 }
 ```
 
-## 10. Disaster Recovery Architecture
+## 11. DEAN Integration Architecture
 
-### 10.1 Backup Strategy
+### 10.1 Service Integration Flow
+
+The DEAN orchestration layer acts as the central coordinator for all service interactions:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        User Interfaces                          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │   CLI Tool   │  │ Web Dashboard│  │   REST API   │          │
+│  │  (dean-cli)  │  │  (Port 8083) │  │  (Port 8082) │          │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘          │
+│         └─────────────────┼─────────────────┘                  │
+│                           ▼                                     │
+│                 ┌───────────────────┐                           │
+│                 │ DEAN Orchestration│                           │
+│                 │     Server        │                           │
+│                 │   (Port 8082)     │                           │
+│                 └─────────┬─────────┘                           │
+│                           │                                     │
+│         ┌─────────────────┼─────────────────┐                  │
+│         ▼                 ▼                 ▼                  │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
+│  │  IndexAgent  │  │   Airflow    │  │  Evolution   │          │
+│  │  (Port 8081) │  │  (Port 8080) │  │    API       │          │
+│  └──────────────┘  └──────────────┘  └──────────────┘          │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 10.2 Authentication and Authorization Flow
+
+```python
+# DEAN authentication flow
+1. User → DEAN API (login request)
+2. DEAN → Auth Service (validate credentials)
+3. Auth Service → DEAN (JWT token)
+4. DEAN → User (authenticated token)
+5. User → DEAN API (request with token)
+6. DEAN → Service (forwarded request with service token)
+7. Service → DEAN (response)
+8. DEAN → User (aggregated response)
+```
+
+### 10.3 Workflow Orchestration
+
+DEAN coordinates complex multi-service workflows:
+
+```yaml
+# Example: Evolution Trial Workflow
+workflow: evolution_trial
+steps:
+  - name: initialize_population
+    service: indexagent
+    endpoint: /api/v1/agents/initialize
+    params:
+      population_size: 10
+      diversity_threshold: 0.3
+  
+  - name: start_evolution
+    service: evolution_api
+    endpoint: /api/v1/evolution/start
+    params:
+      generations: 50
+      token_budget: 100000
+  
+  - name: trigger_airflow_dag
+    service: airflow
+    endpoint: /api/v1/dags/agent_evolution_trial/dagRuns
+    params:
+      conf:
+        trial_id: "{{ steps.start_evolution.trial_id }}"
+  
+  - name: monitor_progress
+    service: dean
+    type: websocket
+    endpoint: /ws/evolution/{{ steps.start_evolution.trial_id }}
+```
+
+### 10.4 Service Registry and Discovery
+
+```python
+# DEAN maintains service registry
+SERVICE_REGISTRY = {
+    "indexagent": {
+        "url": "http://indexagent:8081",
+        "health": "/health",
+        "auth": "bearer",
+        "timeout": 30
+    },
+    "airflow": {
+        "url": "http://airflow-service:8080",
+        "health": "/api/v1/health",
+        "auth": "basic",
+        "timeout": 60
+    },
+    "evolution_api": {
+        "url": "http://agent-evolution:8090",
+        "health": "/health",
+        "auth": "bearer",
+        "timeout": 30
+    }
+}
+```
+
+## 12. Disaster Recovery Architecture
+
+### 11.1 Backup Strategy
 
 ```bash
 # Automated backup script
@@ -578,7 +860,7 @@ tar -czf backups/patterns_$(date +%Y%m%d_%H%M%S).tar.gz /app/data/patterns
 aws s3 sync backups/ s3://dean-backups/$(date +%Y%m%d)/
 ```
 
-### 10.2 Recovery Procedures
+### 11.2 Recovery Procedures
 
 1. **Service Recovery**: Docker Compose restart policies ensure automatic recovery
 2. **Data Recovery**: Point-in-time recovery from PostgreSQL backups

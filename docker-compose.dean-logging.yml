@@ -1,0 +1,218 @@
+version: '3.8'
+
+# DEAN System Docker Compose Configuration with Centralized Logging
+# This file extends the complete configuration with logging infrastructure
+
+services:
+  # Extend existing services with logging configuration
+  postgres:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: postgres
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=postgres,component=database"
+
+  redis:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: redis
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        labels: "service=redis,component=cache"
+
+  dean-orchestrator:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: dean-orchestrator
+    environment:
+      # Add logging configuration
+      LOG_FORMAT: "json"
+      LOG_LEVEL: "INFO"
+      LOG_OUTPUT: "/app/logs/dean-orchestrator.log"
+    volumes:
+      - dean-logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=dean-orchestrator,component=orchestration"
+
+  indexagent:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: indexagent
+    environment:
+      # Add logging configuration
+      LOG_FORMAT: "json"
+      LOG_LEVEL: "INFO"
+      LOG_FILE: "/app/logs/indexagent.log"
+    volumes:
+      - indexagent-logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=indexagent,component=agent"
+
+  dean-api:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: dean-api
+    environment:
+      # Add logging configuration
+      LOG_FORMAT: "json"
+      LOG_LEVEL: "INFO"
+      LOG_PATH: "/app/logs/evolution-api.log"
+    volumes:
+      - evolution-logs:/app/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=evolution-api,component=economy"
+
+  airflow-webserver:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: airflow-webserver
+    environment:
+      # Add Airflow logging configuration
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      AIRFLOW__LOGGING__JSON_FORMAT: 'true'
+      AIRFLOW__LOGGING__LOG_FILENAME_TEMPLATE: '{{ ti.dag_id }}/{{ ti.task_id }}/{{ ts }}/{{ try_number }}.log'
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=airflow-webserver,component=workflow"
+
+  airflow-scheduler:
+    extends:
+      file: docker-compose.dean-complete.yml
+      service: airflow-scheduler
+    environment:
+      # Add Airflow logging configuration
+      AIRFLOW__LOGGING__LOGGING_LEVEL: INFO
+      AIRFLOW__LOGGING__JSON_FORMAT: 'true'
+    volumes:
+      - airflow-logs:/opt/airflow/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+        labels: "service=airflow-scheduler,component=workflow"
+
+  # Centralized Logging Services
+  
+  # Fluentd for log collection
+  fluentd:
+    image: fluent/fluentd:v1.16-debian
+    container_name: dean-fluentd
+    volumes:
+      - ./fluentd/fluent.conf:/fluentd/etc/fluent.conf:ro
+      - dean-logs:/logs/dean:ro
+      - indexagent-logs:/logs/indexagent:ro
+      - evolution-logs:/logs/evolution:ro
+      - airflow-logs:/logs/airflow:ro
+      - fluentd-logs:/fluentd/log
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    environment:
+      FLUENTD_CONF: fluent.conf
+    networks:
+      - dean-network
+    depends_on:
+      - elasticsearch
+
+  # Elasticsearch for log storage
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: dean-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - dean-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Kibana for log visualization
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: dean-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - dean-network
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Log rotation service
+  logrotate:
+    image: blacklabelops/logrotate:latest
+    container_name: dean-logrotate
+    environment:
+      - LOGS_DIRECTORIES=/logs
+      - LOGROTATE_INTERVAL=daily
+      - LOGROTATE_COPIES=7
+      - LOGROTATE_SIZE=100M
+      - LOGROTATE_COMPRESSION=compress
+    volumes:
+      - dean-logs:/logs/dean
+      - indexagent-logs:/logs/indexagent
+      - evolution-logs:/logs/evolution
+      - airflow-logs:/logs/airflow
+    networks:
+      - dean-network
+
+volumes:
+  # Existing volumes
+  dean-postgres-data:
+  dean-redis-data:
+  dean-worktrees:
+  dean-patterns:
+  dean-prometheus-data:
+  dean-grafana-data:
+  
+  # Logging volumes
+  dean-logs:
+  indexagent-logs:
+  evolution-logs:
+  airflow-logs:
+  fluentd-logs:
+  elasticsearch-data:
+
+networks:
+  dean-network:
+    driver: bridge

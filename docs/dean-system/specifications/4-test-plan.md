@@ -16,7 +16,57 @@ All tests must validate economic efficiency at every level, ensuring token consu
 
 ## 2. Test Cases
 
-### 2.1 Agent Lifecycle Tests
+### 2.1 DEAN Orchestration Tests
+
+**TC-DEAN-001: Service Registration and Health Monitoring**
+- **Location**: `DEAN/tests/test_service_registry.py`
+- **Verification**: All services register with DEAN and report health status
+- **Checks**: Service endpoints accessible, health checks return within 5 seconds
+- **Expected**: All services show "healthy" status within 30 seconds of startup
+
+**TC-DEAN-002: Authentication Token Generation**
+- **Location**: `DEAN/tests/test_authentication.py`
+- **Verification**: JWT tokens generated correctly with proper expiration
+- **Checks**: Token contains service identity, expiration time, valid signature
+- **Security**: Tokens expire after configured duration, invalid tokens rejected
+
+**TC-DEAN-003: Evolution Trial Orchestration**
+- **Location**: `DEAN/tests/integration/test_evolution_orchestration.py`
+- **Verification**: DEAN coordinates complete evolution trial across services
+- **Flow**: Initialize population → Start evolution → Monitor progress → Collect results
+- **Services**: IndexAgent, Evolution API, and Airflow all receive correct commands
+
+**TC-DEAN-004: WebSocket Real-time Updates**
+- **Location**: `DEAN/tests/test_websocket_monitoring.py`
+- **Verification**: WebSocket connections provide real-time evolution updates
+- **Updates**: Generation progress, metrics, diversity scores, pattern discoveries
+- **Performance**: Updates delivered within 100ms of event occurrence
+
+**TC-DEAN-005: Service-to-Service Authentication**
+- **Location**: `DEAN/tests/test_service_auth.py`
+- **Verification**: Services authenticate through DEAN for inter-service calls
+- **Flow**: Service A → DEAN (auth) → Service B with token
+- **Security**: Direct service-to-service calls without DEAN auth are rejected
+
+**TC-DEAN-006: Circuit Breaker Functionality**
+- **Location**: `DEAN/tests/test_circuit_breaker.py`
+- **Verification**: Circuit breakers prevent cascading failures
+- **Scenario**: Service becomes unresponsive, circuit opens after 5 failures
+- **Recovery**: Circuit enters half-open state after timeout, closes on success
+
+**TC-DEAN-007: Workflow Execution**
+- **Location**: `DEAN/tests/test_workflow_execution.py`
+- **Verification**: Multi-service workflows execute with proper error handling
+- **Workflow**: Pattern propagation across repositories
+- **Rollback**: Failed steps trigger compensating actions
+
+**TC-DEAN-008: CLI Command Integration**
+- **Location**: `DEAN/tests/test_cli_commands.py`
+- **Verification**: All CLI commands execute correctly and return expected results
+- **Commands**: evolution start/stop/status, service health, workflow execute
+- **Output**: Proper formatting, error messages, and status codes
+
+### 2.2 Agent Lifecycle Tests
 
 **TC-001: Agent Creation in Isolated Worktree**
 - **Location**: `IndexAgent/tests/test_worktree_manager.py`
@@ -48,7 +98,7 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: Accurate calculation stored in `performance_metrics` table
 - **Formula**: `value_generated / tokens_consumed`
 
-### 2.2 Evolution Tests
+### 2.3 Evolution Tests
 
 **TC-007: DSPy Prompt Optimization**
 - **Location**: `IndexAgent/tests/test_dspy_integration.py`
@@ -80,7 +130,7 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: Forced mutations applied when convergence detected
 - **Rate**: 15% of population mutated per configuration
 
-### 2.3 Economic Efficiency Tests
+### 2.4 Economic Efficiency Tests
 
 **TC-013: Performance-Based Allocation**
 - **Location**: `IndexAgent/tests/test_token_allocation.py`
@@ -112,7 +162,7 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: ROI = (value_generated - token_cost) / token_cost
 - **Storage**: Results in `performance_metrics` table
 
-### 2.4 Diversity Maintenance Tests
+### 2.5 Diversity Maintenance Tests
 
 **TC-019: Population Variance Calculation**
 - **Location**: `IndexAgent/tests/test_variance_calculation.py`
@@ -144,7 +194,7 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: Diverse agents have higher reproduction probability
 - **Weight**: Diversity score affects selection probability
 
-### 2.5 Emergent Behavior Tests
+### 2.6 Emergent Behavior Tests
 
 **TC-025: Novel Pattern Detection**
 - **Location**: `IndexAgent/tests/test_pattern_detection.py`
@@ -176,7 +226,7 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: Successful strategies exported to JSON format
 - **API**: GET `/api/v1/patterns/export`
 
-### 2.6 Parallelization Tests
+### 2.7 Parallelization Tests
 
 **TC-031: Concurrent Agent Execution**
 - **Location**: `IndexAgent/tests/integration/test_parallel_agents.py`
@@ -208,7 +258,7 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: Fair token distribution across parallel agents
 - **Algorithm**: Round-robin with efficiency weighting
 
-### 2.7 Knowledge Repository Tests
+### 2.8 Knowledge Repository Tests
 
 **TC-037: Pattern Storage and Indexing**
 - **Location**: `IndexAgent/tests/test_pattern_storage.py`
@@ -240,9 +290,66 @@ All tests must validate economic efficiency at every level, ensuring token consu
 - **Verification**: Analytical queries span multiple generations
 - **Query**: Efficiency trends over 10+ generations
 
-## 3. Test Data
+## 3. Integration Testing
 
-### 3.1 Economic Test Scenarios
+### 3.1 DEAN Service Integration Tests
+
+**IT-DEAN-001: End-to-End Evolution Trial**
+- **Setup**: Start all services via DEAN orchestration
+- **Execution**: Run complete evolution trial through DEAN CLI
+- **Verification**: 
+  - Population created in IndexAgent
+  - Evolution process monitored via Airflow
+  - Results aggregated through DEAN API
+  - All services report healthy throughout
+
+**IT-DEAN-002: Multi-Service Workflow**
+- **Scenario**: Pattern propagation from one repository to another
+- **Flow**: 
+  1. Discover pattern in IndexAgent
+  2. DEAN orchestrates pattern extraction
+  3. Pattern applied to airflow-hub via DEAN workflow
+  4. Results validated across both repositories
+- **Verification**: Pattern successfully transferred and applied
+
+**IT-DEAN-003: Service Failure Recovery**
+- **Scenario**: IndexAgent becomes unavailable during evolution
+- **Expected Behavior**:
+  - DEAN detects service failure within 30 seconds
+  - Circuit breaker activates
+  - Evolution trial pauses gracefully
+  - Recovery attempted when service returns
+- **Verification**: No data loss, trial resumes from checkpoint
+
+**IT-DEAN-004: Authentication Flow Integration**
+- **Test**: Complete authentication flow from user to service
+- **Steps**:
+  1. User authenticates with DEAN
+  2. DEAN issues JWT token
+  3. User requests trigger service calls
+  4. Services validate tokens with DEAN
+- **Verification**: All requests properly authenticated
+
+### 3.2 Performance Integration Tests
+
+**PT-DEAN-001: Concurrent Evolution Trials**
+- **Load**: 5 simultaneous evolution trials
+- **Metrics**:
+  - API response time < 200ms
+  - WebSocket updates < 100ms latency
+  - Service health checks complete < 5s
+- **Resources**: Monitor CPU and memory usage
+
+**PT-DEAN-002: Large-Scale Monitoring**
+- **Setup**: 100 concurrent WebSocket connections
+- **Verification**:
+  - All connections receive updates
+  - No message loss or delay > 500ms
+  - Server resources remain stable
+
+## 4. Test Data
+
+### 4.1 Economic Test Scenarios
 
 ```python
 # IndexAgent/tests/fixtures/economic_scenarios.py

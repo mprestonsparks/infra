@@ -6,13 +6,16 @@
 
 **Token Economy Monitoring**
 
-Each morning, system administrators should review the token consumption dashboard accessible at http://localhost:8090/dashboard. This review identifies any agents exceeding their allocated budgets and ensures global token utilization remains below 80% of the daily allocation configured in the AGENT_EVOLUTION_MAX_POPULATION environment variable. Administrators should examine value-per-token metrics stored in the agent_evolution.performance_metrics table for any significant degradation that might indicate inefficient agent behavior.
+Each morning, system administrators should review the token consumption dashboard accessible through DEAN at http://localhost:8083. This review identifies any agents exceeding their allocated budgets and ensures global token utilization remains below 80% of the daily allocation configured in the AGENT_EVOLUTION_MAX_POPULATION environment variable. Administrators should examine value-per-token metrics aggregated by DEAN from all services for any significant degradation that might indicate inefficient agent behavior.
 
-To perform these checks efficiently, use the following commands:
+To perform these checks efficiently, use the following DEAN commands:
 
 ```bash
-# Check global token usage
-docker exec agent-evolution dean-cli budget status --detailed
+# Check global token usage across all services
+dean-cli budget status --detailed
+
+# Monitor service-specific consumption
+dean-cli service metrics --service evolution-api --metric token-usage
 
 # Identify high-consumption agents
 docker exec postgres psql -U postgres -d agent_evolution -c \
@@ -27,25 +30,29 @@ docker exec postgres psql -U postgres -d agent_evolution -c \
 
 **Diversity Health Checks**
 
-Population diversity monitoring ensures the system maintains healthy genetic variance above the configured threshold of 0.3. Review the mutation injection logs located at /app/logs/diversity_monitor.log to confirm the system actively maintains diversity. Check for monoculture warnings in the Airflow task logs, which indicate premature convergence requiring intervention.
+Population diversity monitoring ensures the system maintains healthy genetic variance above the configured threshold of 0.3. Review the diversity metrics through DEAN's monitoring interface to confirm the system actively maintains diversity. Check for monoculture warnings aggregated by DEAN from all services, which indicate premature convergence requiring intervention.
 
 ```bash
-# Check current diversity score
-curl http://localhost:8090/api/v1/metrics/diversity
+# Check current diversity score across all active trials
+dean-cli evolution diversity --all-trials
 
 # Review mutation injection history
-docker exec agent-evolution grep "mutation_injection" /app/logs/evolution.log | tail -20
+dean-cli evolution mutations --period 24h
+
+# Force diversity injection if needed
+dean-cli evolution inject-diversity --trial-id <id> --rate 0.2
 ```
 
 **Pattern Discovery Review**
 
-Examine newly discovered patterns from the previous 24 hours through the pattern management interface. Each pattern requires classification as either a beneficial innovation worthy of preservation or a metric gaming behavior that should be blocked. Approved patterns must be added to the reusable component library stored in Redis and backed up to PostgreSQL.
+Examine newly discovered patterns from the previous 24 hours through DEAN's pattern management interface. Each pattern requires classification as either a beneficial innovation worthy of preservation or a metric gaming behavior that should be blocked. DEAN automatically propagates approved patterns across all connected services.
 
 ```bash
-# List recent discoveries
-docker exec agent-evolution dean-cli patterns list \
-  --discovered-after="24 hours ago" \
-  --status=unclassified
+# List recent discoveries from all services
+dean-cli patterns list --discovered-after="24 hours ago" --status=unclassified
+
+# Review pattern details
+dean-cli patterns show --id <pattern_id>
 
 # Classify a pattern
 docker exec agent-evolution dean-cli patterns classify \
@@ -196,9 +203,142 @@ docker exec agent-evolution dean-cli patterns validate \
   --report=/app/data/reports/import_validation.json
 ```
 
-## 2. Troubleshooting
+## 2. DEAN-Specific Maintenance
 
-### 2.1 Token Economy Issues
+### 2.1 Service Health Management
+
+**Daily Service Monitoring**
+
+DEAN continuously monitors all registered services. Administrators should review the aggregated health status daily:
+
+```bash
+# Check all services
+dean-cli service health --detailed
+
+# Review service logs
+dean-cli service logs --all --since 1h --errors-only
+
+# Check service connections
+dean-cli service test-connections
+```
+
+**Service Registry Maintenance**
+
+Ensure all services are properly registered and their endpoints are current:
+
+```bash
+# List registered services
+dean-cli service list
+
+# Update service endpoint
+dean-cli service update --name indexagent --endpoint http://indexagent:8081
+
+# Remove stale services
+dean-cli service remove --name deprecated-service
+```
+
+### 2.2 Authentication System Maintenance
+
+**Token Management**
+
+Regularly review and rotate authentication tokens:
+
+```bash
+# List active tokens
+dean-cli auth tokens list --active
+
+# Revoke expired tokens
+dean-cli auth tokens cleanup --expired
+
+# Rotate service tokens
+dean-cli auth tokens rotate --service all --grace-period 24h
+```
+
+**Access Control Review**
+
+Monthly review of user permissions and roles:
+
+```bash
+# Audit user permissions
+dean-cli auth audit --output permissions-report.csv
+
+# Review role assignments
+dean-cli auth roles list --with-users
+
+# Update role permissions
+dean-cli auth roles update --role operator --add-permission evolution.modify
+```
+
+### 2.3 Orchestration Maintenance
+
+**Workflow Management**
+
+Maintain and optimize workflow definitions:
+
+```bash
+# List all workflows
+dean-cli workflow list --with-stats
+
+# Test workflow execution
+dean-cli workflow test --name pattern-propagation --dry-run
+
+# Update workflow definition
+dean-cli workflow update --file workflows/evolution-trial.yaml
+
+# Archive unused workflows
+dean-cli workflow archive --unused-days 90
+```
+
+**Circuit Breaker Maintenance**
+
+Monitor and adjust circuit breaker settings:
+
+```bash
+# Check circuit breaker status
+dean-cli circuit-breaker status
+
+# Reset tripped breakers
+dean-cli circuit-breaker reset --service indexagent
+
+# Adjust thresholds
+dean-cli circuit-breaker configure --service airflow --failure-threshold 10
+```
+
+### 2.4 DEAN System Updates
+
+**Rolling Updates**
+
+Perform DEAN updates without service interruption:
+
+```bash
+# Check for updates
+dean-cli system check-updates
+
+# Backup configuration
+dean-cli system backup-config --output /backup/dean-config-$(date +%Y%m%d).tar.gz
+
+# Perform rolling update
+dean-cli system update --strategy rolling --health-check-interval 30s
+```
+
+**Configuration Management**
+
+Maintain DEAN configuration files:
+
+```bash
+# Validate configuration
+dean-cli config validate --file DEAN/configs/services.yaml
+
+# Apply configuration changes
+dean-cli config apply --file DEAN/configs/services.yaml --restart-services
+
+# Export current configuration
+dean-cli config export --format yaml --output current-config.yaml
+```
+
+## 3. Troubleshooting
+
+### 3.1 Token Economy Issues
 
 **Excessive Token Consumption**
 
@@ -419,7 +559,7 @@ docker exec agent-evolution dean-cli health database \
   --suggest-optimizations
 ```
 
-## 3. Performance Tuning
+## 4. Performance Tuning
 
 ### 3.1 Token Efficiency Optimization
 
@@ -579,7 +719,7 @@ services:
           memory: '4G'
 ```
 
-## 4. Backup and Recovery
+## 5. Backup and Recovery
 
 ### 4.1 Backup Procedures
 
@@ -680,9 +820,24 @@ docker exec agent-evolution dean-cli recovery \
   --validate
 ```
 
-## 5. Monitoring and Alerting
+## 6. Monitoring and Alerting
 
-### 5.1 Key Metrics to Monitor
+### 6.1 DEAN Centralized Monitoring
+
+DEAN aggregates metrics from all services and provides unified monitoring:
+
+```bash
+# Access DEAN monitoring dashboard
+open http://localhost:8083/monitoring
+
+# CLI-based monitoring
+dean-cli monitor --metric all --period 1h
+
+# Export metrics for external systems
+dean-cli metrics export --format prometheus --output /metrics/
+```
+
+### 6.2 Key Metrics to Monitor
 
 **Economic Health Indicators**
 
@@ -806,7 +961,7 @@ receivers:
       - service_key: 'YOUR_PAGERDUTY_KEY'
 ```
 
-## 6. Emergency Procedures
+## 7. Emergency Procedures
 
 ### 6.1 Token Budget Exhaustion
 
@@ -876,7 +1031,7 @@ docker exec postgres psql -U postgres -d agent_evolution -c \
 docker-compose restart agent-evolution
 ```
 
-## 7. Maintenance Windows
+## 8. Maintenance Windows
 
 ### 7.1 Scheduled Maintenance
 
@@ -913,7 +1068,7 @@ docker exec agent-evolution dean-cli migrate \
   --backup-first
 ```
 
-## 8. Documentation Maintenance
+## 9. Documentation Maintenance
 
 Keep operational documentation current:
 

@@ -2,7 +2,7 @@
 
 ## 1. System Overview
 
-The Distributed Evolutionary Agent Network (DEAN) implements a fractal architecture where agents recursively improve themselves while maintaining isolated execution environments through git worktrees. The system is distributed across three repositories with specific integration points and incorporates economic constraints, genetic diversity maintenance, and emergent behavior capture as fundamental design elements.
+The Distributed Evolutionary Agent Network (DEAN) implements a fractal architecture where agents recursively improve themselves while maintaining isolated execution environments through git worktrees. The system is distributed across four repositories with the DEAN repository serving as the primary orchestration layer. The architecture incorporates economic constraints, genetic diversity maintenance, and emergent behavior capture as fundamental design elements, all coordinated through the DEAN orchestration server.
 
 ## 2. Design Principles
 
@@ -274,9 +274,278 @@ CREATE INDEX idx_patterns_reuse ON agent_evolution.discovered_patterns(reuse_cou
 CREATE INDEX idx_evolution_performance ON agent_evolution.strategy_evolution(performance_delta DESC);
 ```
 
+### 3.3 DEAN Orchestration Components
+
+The DEAN repository provides the primary orchestration layer that coordinates all services:
+
+#### OrchestrationServer Class
+Location: `DEAN/src/dean_orchestration/server.py`
+
+```python
+from fastapi import FastAPI, WebSocket
+from typing import Dict, List, Optional
+from ..auth import AuthManager
+from ..integration import ServiceRegistry
+
+class OrchestrationServer:
+    """Main orchestration server coordinating all DEAN services"""
+    
+    def __init__(self):
+        self.app = FastAPI(title="DEAN Orchestration API")
+        self.auth_manager = AuthManager()
+        self.service_registry = ServiceRegistry()
+        self.active_workflows: Dict[str, WorkflowState] = {}
+        
+    async def coordinate_evolution_trial(self, trial_config: EvolutionConfig) -> str:
+        """Orchestrates complete evolution trial across services"""
+        trial_id = str(uuid.uuid4())
+        
+        # Step 1: Initialize population in IndexAgent
+        population = await self.service_registry.indexagent.initialize_population(
+            size=trial_config.population_size,
+            diversity_threshold=trial_config.diversity_threshold
+        )
+        
+        # Step 2: Start evolution in Evolution API
+        evolution_job = await self.service_registry.evolution_api.start_evolution(
+            population_ids=population.agent_ids,
+            generations=trial_config.generations,
+            token_budget=trial_config.token_budget
+        )
+        
+        # Step 3: Trigger Airflow DAG for monitoring
+        dag_run = await self.service_registry.airflow.trigger_dag(
+            dag_id="agent_evolution_trial",
+            conf={"trial_id": trial_id, "job_id": evolution_job.id}
+        )
+        
+        return trial_id
+```
+
+#### ServiceRegistry Class
+Location: `DEAN/src/integration/registry.py`
+
+```python
+class ServiceRegistry:
+    """Maintains registry of all DEAN services with health monitoring"""
+    
+    def __init__(self):
+        self.services = {
+            "indexagent": ServiceClient("http://indexagent:8081", "bearer"),
+            "airflow": ServiceClient("http://airflow-service:8080", "basic"),
+            "evolution_api": ServiceClient("http://agent-evolution:8090", "bearer")
+        }
+        self._health_check_interval = 30  # seconds
+        
+    async def health_check_all(self) -> Dict[str, bool]:
+        """Performs health checks on all registered services"""
+        results = {}
+        for name, client in self.services.items():
+            results[name] = await client.health_check()
+        return results
+```
+
+#### AuthManager Class
+Location: `DEAN/src/auth/manager.py`
+
+```python
+from jose import jwt, JWTError
+from passlib.context import CryptContext
+
+class AuthManager:
+    """Unified authentication manager for all DEAN services"""
+    
+    def __init__(self):
+        self.pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        self.secret_key = os.getenv("DEAN_SECRET_KEY")
+        self.algorithm = "HS256"
+        
+    def create_service_token(self, service_name: str) -> str:
+        """Creates JWT token for service-to-service authentication"""
+        payload = {
+            "sub": service_name,
+            "type": "service",
+            "exp": datetime.utcnow() + timedelta(hours=24)
+        }
+        return jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
+        
+    async def authenticate_request(self, token: str) -> Optional[Dict]:
+        """Validates incoming request authentication"""
+        try:
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            return payload
+        except JWTError:
+            return None
+```
+
+#### WorkflowCoordinator Class
+Location: `DEAN/src/orchestration/coordinator.py`
+
+```python
+class WorkflowCoordinator:
+    """Coordinates complex multi-service workflows"""
+    
+    def __init__(self, service_registry: ServiceRegistry):
+        self.registry = service_registry
+        self.workflow_definitions = self._load_workflow_definitions()
+        
+    async def execute_workflow(self, workflow_name: str, params: Dict) -> WorkflowResult:
+        """Executes a defined workflow across multiple services"""
+        workflow = self.workflow_definitions.get(workflow_name)
+        if not workflow:
+            raise ValueError(f"Unknown workflow: {workflow_name}")
+            
+        context = WorkflowContext(params)
+        
+        for step in workflow.steps:
+            service = self.registry.services.get(step.service)
+            result = await service.call(step.endpoint, step.params, context)
+            context.store_result(step.name, result)
+            
+            if step.wait_for_completion:
+                await self._wait_for_completion(service, result)
+                
+        return WorkflowResult(context)
+```
+
+#### CLI Interface
+Location: `DEAN/src/interfaces/cli.py`
+
+```python
+import click
+from ..orchestration import OrchestrationClient
+
+@click.group()
+def dean_cli():
+    """DEAN Command Line Interface for system orchestration"""
+    pass
+
+@dean_cli.command()
+@click.option('--population-size', default=10, help='Initial agent population size')
+@click.option('--generations', default=50, help='Number of evolution generations')
+@click.option('--token-budget', default=100000, help='Total token budget for trial')
+def evolution_start(population_size: int, generations: int, token_budget: int):
+    """Start a new evolution trial"""
+    client = OrchestrationClient()
+    trial_id = client.start_evolution_trial(
+        population_size=population_size,
+        generations=generations,
+        token_budget=token_budget
+    )
+    click.echo(f"Evolution trial started: {trial_id}")
+    
+@dean_cli.command()
+def status():
+    """Check system and service status"""
+    client = OrchestrationClient()
+    health = client.get_system_health()
+    
+    for service, is_healthy in health.items():
+        status = "✓" if is_healthy else "✗"
+        click.echo(f"{status} {service}")
+```
+
 ## 4. Integration Design
 
-### 4.1 DSPy Integration with Meta-Learning
+### 4.1 DEAN Orchestration Integration
+
+When deploying the complete DEAN system, the DEAN repository serves as the orchestration layer for coordinating DEAN-specific workflows:
+
+#### Service Communication Flow
+```python
+# Example: Complete evolution trial orchestrated by DEAN
+async def evolution_trial_flow():
+    # 1. User initiates via DEAN CLI
+    dean_cli evolution start --population-size 10 --generations 50
+    
+    # 2. DEAN Server receives request
+    trial_request = {
+        "population_size": 10,
+        "generations": 50,
+        "token_budget": 100000,
+        "diversity_threshold": 0.3
+    }
+    
+    # 3. DEAN orchestrates service calls
+    # IndexAgent: Create agent population
+    population = await dean.indexagent.create_population(trial_request)
+    
+    # Evolution API: Start evolution process
+    evolution_job = await dean.evolution_api.start_evolution({
+        "population_ids": population.agent_ids,
+        "config": trial_request
+    })
+    
+    # Airflow: Monitor via DAG
+    dag_run = await dean.airflow.trigger_dag(
+        "agent_evolution_trial",
+        {"job_id": evolution_job.id}
+    )
+    
+    # 4. DEAN provides real-time updates via WebSocket
+    async with dean.websocket_connect(f"/ws/evolution/{evolution_job.id}") as ws:
+        async for update in ws:
+            print(f"Generation {update.generation}: {update.metrics}")
+```
+
+#### Authentication Integration
+```python
+# All services authenticate through DEAN
+class ServiceAuthMiddleware:
+    """Middleware for service-to-service authentication via DEAN"""
+    
+    async def __call__(self, request: Request, call_next):
+        # Extract DEAN service token
+        token = request.headers.get("X-DEAN-Service-Token")
+        
+        if not token:
+            return JSONResponse(status_code=401, content={"error": "Missing service token"})
+            
+        # Validate with DEAN auth service
+        auth_result = await dean_client.validate_service_token(token)
+        
+        if not auth_result.valid:
+            return JSONResponse(status_code=403, content={"error": "Invalid service token"})
+            
+        # Add service identity to request
+        request.state.service_identity = auth_result.service_name
+        
+        return await call_next(request)
+```
+
+#### Configuration Management
+```yaml
+# DEAN/configs/services.yaml
+services:
+  indexagent:
+    url: "http://indexagent:8081"
+    auth_type: "bearer"
+    timeout: 30
+    health_endpoint: "/health"
+    
+  airflow:
+    url: "http://airflow-service:8080"
+    auth_type: "basic"
+    timeout: 60
+    health_endpoint: "/api/v1/health"
+    
+  evolution_api:
+    url: "http://agent-evolution:8090"
+    auth_type: "bearer"
+    timeout: 30
+    health_endpoint: "/health"
+
+orchestration:
+  default_timeout: 300
+  retry_policy:
+    max_attempts: 3
+    backoff_factor: 2
+  circuit_breaker:
+    failure_threshold: 5
+    recovery_timeout: 60
+```
+
+### 4.2 DSPy Integration with Meta-Learning
 
 Location: `IndexAgent/indexagent/agents/evolution/dspy_optimizer.py`
 
@@ -354,7 +623,119 @@ tasks:
       parallel_workers: 4
 ```
 
-## 5. Data Flow
+## 5. Integration Best Practices
+
+### 5.1 Maintaining Loose Coupling
+
+To ensure services remain independently deployable and reusable:
+
+#### Configuration-Based Integration
+```python
+# Good: Use configuration for service endpoints
+class ServiceClient:
+    def __init__(self, service_name: str):
+        # Get from environment or config file
+        self.base_url = os.getenv(f"{service_name.upper()}_URL")
+        if not self.base_url:
+            raise ValueError(f"No URL configured for {service_name}")
+
+# Bad: Hardcoded service locations
+class ServiceClient:
+    def __init__(self):
+        self.base_url = "http://my-service:8080"  # ❌ Tight coupling
+```
+
+#### Optional Service Dependencies
+```python
+# Good: Services are optional with graceful degradation
+class EnhancedWorkflow:
+    def __init__(self):
+        self.optional_services = {}
+        
+    def register_service(self, name: str, client: ServiceClient):
+        """Register optional service enhancement"""
+        try:
+            if client.health_check():
+                self.optional_services[name] = client
+        except:
+            logger.info(f"Service {name} not available - continuing without")
+    
+    def execute(self):
+        # Core functionality works without optional services
+        result = self.core_logic()
+        
+        # Enhance with optional services if available
+        for name, service in self.optional_services.items():
+            try:
+                result = service.enhance(result)
+            except:
+                logger.warning(f"Enhancement from {name} failed")
+        
+        return result
+```
+
+#### Anti-Patterns to Avoid
+
+1. **Cross-Repository Imports**
+```python
+# Bad: Direct import from another repository
+from infra.services.economy import EconomicGovernor  # ❌
+
+# Good: Use API or package
+from dean_common import EconomicGovernor  # ✓ Shared package
+# Or use REST API
+economic_api = ServiceClient("economy")
+```
+
+2. **Synchronous Service Dependencies**
+```python
+# Bad: Service fails if dependency unavailable
+def process():
+    other_service = connect_to_service()  # Fails if down
+    return other_service.required_data()  # ❌
+
+# Good: Async with fallback
+async def process():
+    try:
+        other_service = await try_connect_to_service()
+        return await other_service.get_data()
+    except ServiceUnavailable:
+        return get_cached_or_default_data()  # ✓
+```
+
+### 5.2 Service Communication Patterns
+
+#### Event-Driven Architecture
+```python
+# Services communicate through events, not direct calls
+class EventPublisher:
+    async def publish(self, event_type: str, data: dict):
+        # Publish to message queue or event bus
+        await self.queue.send({
+            "type": event_type,
+            "data": data,
+            "timestamp": datetime.utcnow()
+        })
+
+# Services subscribe to relevant events
+class EventSubscriber:
+    async def handle_event(self, event):
+        if event["type"] == "agent.evolved":
+            await self.process_evolution(event["data"])
+```
+
+#### API Gateway Pattern
+```python
+# DEAN acts as API gateway for external clients
+class DEANGateway:
+    def route_request(self, path: str, request):
+        service = self.identify_service(path)
+        if service and service.is_healthy():
+            return service.forward(request)
+        return self.handle_unavailable_service()
+```
+
+## 6. Data Flow
 
 ### 5.1 Standard Evolution Flow
 
@@ -367,7 +748,7 @@ tasks:
 7. Successful changes create pull requests via GitHub API
 8. Metrics update in PostgreSQL for future evolution and meta-learning
 
-### 5.2 Meta-Learning Flow
+### 6.2 Meta-Learning Flow
 
 1. Pattern analysis identifies successful strategies via SQL queries
 2. Strategy extraction creates reusable components in pattern library
@@ -375,31 +756,68 @@ tasks:
 4. Future agents inherit successful patterns through genome initialization
 5. Cross-domain pattern transfer maintains diversity via import scripts
 
-## 6. Safety and Constraint Design
+## 7. Safety and Constraint Design
 
-### 6.1 Economic Safety
+### 7.1 Economic Safety
 
 - Hard token limits enforced at API level via FastAPI middleware
 - Automatic agent termination on budget exhaustion through Airflow monitoring
 - Progressive budget reduction for inefficient agents per `evolution.yaml` config
 
-### 6.2 Behavioral Safety
+### 7.2 Behavioral Safety
 
 - Prevent agents from modifying safety constraints through read-only mounts
 - Detect and block metric gaming behaviors via pattern classifier
 - Maintain audit trail in PostgreSQL `agent_evolution.audit_log` table
 
-### 6.3 Diversity Safety
+### 7.3 Diversity Safety
 
 - Prevent monoculture through forced mutations when variance < 0.3
 - Maintain minimum strategy variance via continuous monitoring
 - Regular injection of external patterns from pattern library
 
-## 7. API Design
+## 8. API Design
 
-### 7.1 REST API Endpoints
+### 8.1 DEAN Orchestration API Endpoints
 
-Base URL: `http://agent-evolution:8080/api/v1`
+Base URL: `http://dean-server:8082/api/v1`
+
+```python
+# DEAN/src/dean_orchestration/api/routes.py
+from fastapi import APIRouter, HTTPException, Depends
+from typing import List, Dict
+
+router = APIRouter(prefix="/orchestration", tags=["orchestration"])
+
+@router.post("/evolution/start")
+async def start_evolution_trial(config: EvolutionTrialConfig) -> Dict:
+    """Start a new evolution trial across all services"""
+    
+@router.get("/evolution/{trial_id}/status")
+async def get_evolution_status(trial_id: str) -> EvolutionStatus:
+    """Get real-time status of evolution trial"""
+    
+@router.post("/workflow/execute")
+async def execute_workflow(workflow: WorkflowRequest) -> Dict:
+    """Execute a multi-service workflow"""
+    
+@router.get("/services/health")
+async def get_services_health() -> Dict[str, bool]:
+    """Check health status of all registered services"""
+    
+@router.post("/auth/login")
+async def login(credentials: LoginCredentials) -> Dict:
+    """Authenticate and receive JWT token"""
+    
+@router.post("/auth/service-token")
+async def create_service_token(service: ServiceTokenRequest) -> Dict:
+    """Generate service-to-service authentication token"""
+```
+
+### 8.2 Service-Specific API Endpoints
+
+#### IndexAgent API
+Base URL: `http://indexagent:8081/api/v1`
 
 ```python
 # IndexAgent/src/api/agents.py
@@ -429,9 +847,39 @@ async def get_efficiency_metrics() -> Dict:
     """Get population-wide efficiency metrics"""
 ```
 
-### 7.2 WebSocket Support
+### 8.3 WebSocket Support
 
+#### DEAN WebSocket Endpoints
 ```python
+# DEAN/src/dean_orchestration/api/websocket.py
+@router.websocket("/ws/evolution/{trial_id}")
+async def monitor_evolution_trial(websocket: WebSocket, trial_id: str):
+    """Real-time evolution trial monitoring"""
+    await websocket.accept()
+    
+    async for update in evolution_monitor.subscribe(trial_id):
+        await websocket.send_json({
+            "trial_id": trial_id,
+            "generation": update.generation,
+            "metrics": update.metrics,
+            "best_agents": update.best_agents,
+            "diversity_score": update.diversity_score
+        })
+
+@router.websocket("/ws/services/health")
+async def monitor_service_health(websocket: WebSocket):
+    """Real-time service health monitoring"""
+    await websocket.accept()
+    
+    while True:
+        health_status = await service_registry.health_check_all()
+        await websocket.send_json(health_status)
+        await asyncio.sleep(5)
+```
+
+#### Service-Specific WebSocket Support
+```python
+# IndexAgent WebSocket (accessed via DEAN)
 @router.websocket("/agents/{agent_id}/monitor")
 async def monitor_agent(websocket: WebSocket, agent_id: str):
     """Real-time agent monitoring via WebSocket"""

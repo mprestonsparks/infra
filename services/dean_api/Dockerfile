@@ -29,5 +29,5 @@ EXPOSE 8091
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8091/health || exit 1
 
-# Run the application with evolution modules
-CMD ["uvicorn", "main_integrated:app", "--host", "0.0.0.0", "--port", "8091", "--log-level", "info"]
+# Run the standalone application without cross-repo dependencies
+CMD ["uvicorn", "main_standalone:app", "--host", "0.0.0.0", "--port", "8091", "--log-level", "info"]

@@ -10,10 +10,11 @@ Before installing the DEAN system, ensure your environment meets the following r
 
 #### Step 1: Clone Required Repositories
 
-Clone all three repositories that comprise the DEAN system into a common parent directory:
+Clone all four repositories that comprise the DEAN system into a common parent directory:
 
 ```bash
 mkdir dean-system && cd dean-system
+git clone https://github.com/mprestonsparks/DEAN
 git clone https://github.com/mprestonsparks/airflow-hub
 git clone https://github.com/mprestonsparks/infra
 git clone https://github.com/mprestonsparks/IndexAgent
@@ -48,6 +49,14 @@ DEAN_PATTERN_IMPORT_ENABLED=true
 # Operational configuration
 AGENT_MAX_CONCURRENT=4
 AGENT_EVOLUTION_PORT=8090
+
+# DEAN orchestration configuration
+DEAN_SERVER_HOST=localhost
+DEAN_SERVER_PORT=8082
+DEAN_WEB_PORT=8083
+DEAN_SERVICE_API_KEY=your_service_api_key_here
+DEAN_ENV=development
+DEAN_TOKEN_EXPIRY=3600
 AGENT_REGISTRY_PORT=6380
 AGENT_EVOLUTION_LOG_LEVEL=INFO
 
@@ -106,15 +115,83 @@ docker exec agent-registry redis-cli ping
 
 ### Running Agent Evolution
 
-#### Basic Evolution Run
+#### Using DEAN CLI (Recommended)
 
-The simplest way to start agent evolution is through the Airflow web interface. Access the Airflow UI at http://localhost:8080 using the default credentials. Navigate to the DAGs page and locate the `dean_agent_lifecycle` DAG. Click on the DAG name to view its details, then click "Trigger DAG" to start with default parameters.
+The DEAN CLI provides the primary interface for controlling agent evolution:
+
+```bash
+# Start a basic evolution trial
+dean-cli evolution start
+
+# Start with custom parameters
+dean-cli evolution start --population-size 8 --generations 20 --token-budget 50000
+
+# Check evolution status
+dean-cli evolution status
+
+# List all active trials
+dean-cli evolution list
+
+# Stop a specific trial
+dean-cli evolution stop --trial-id <trial_id>
+```
 
 The default configuration spawns 4 agents with 4096 tokens each, maintains a minimum diversity threshold of 0.3, and runs for 10 evolution generations.
 
+#### Using DEAN Web Dashboard
+
+Access the DEAN web dashboard at http://localhost:8083 for a visual interface:
+
+1. Navigate to the "Evolution Trials" section
+2. Click "New Trial" to configure parameters
+3. Monitor real-time progress with live metrics
+4. View detailed agent performance graphs
+5. Export results and discovered patterns
+
+#### Direct API Access
+
+For programmatic control, use the DEAN REST API:
+
+```python
+import requests
+
+# Authenticate and get token
+auth_response = requests.post(
+    "http://localhost:8082/api/v1/auth/login",
+    json={"username": "admin", "password": "your_password"}
+)
+token = auth_response.json()["access_token"]
+
+# Start evolution trial
+headers = {"Authorization": f"Bearer {token}"}
+trial_response = requests.post(
+    "http://localhost:8082/api/v1/orchestration/evolution/start",
+    headers=headers,
+    json={
+        "population_size": 8,
+        "generations": 20,
+        "token_budget": 50000,
+        "diversity_threshold": 0.4
+    }
+)
+trial_id = trial_response.json()["trial_id"]
+
+# Monitor progress via WebSocket
+import websockets
+import asyncio
+
+async def monitor_trial():
+    uri = f"ws://localhost:8082/ws/evolution/{trial_id}"
+    async with websockets.connect(uri, extra_headers=headers) as websocket:
+        async for message in websocket:
+            print(f"Evolution update: {message}")
+
+asyncio.run(monitor_trial())
+```
+
 #### Advanced Configuration
 
-For more control over the evolution process, trigger the DAG with custom configuration. Click "Trigger DAG w/ Config" and provide JSON parameters:
+For advanced evolution trials, use the DEAN CLI with a configuration file:
 
 ```json
 {
@@ -139,7 +216,15 @@ For more control over the evolution process, trigger the DAG with custom configu
 
 The Airflow interface provides real-time monitoring of agent evolution. The Graph view displays the current status of each task in the DAG. Click on individual tasks to view detailed logs including token consumption, diversity metrics, and discovered patterns. The Gantt chart shows task execution timing and parallelism.
 
-For more detailed monitoring, access the DEAN dashboard at http://localhost:8090/dashboard, which provides real-time metrics on agent performance, population diversity, token consumption rates, and pattern discovery.
+For comprehensive monitoring, use the DEAN web dashboard at http://localhost:8083, which provides:
+- Real-time evolution progress with generation-by-generation metrics
+- Agent performance comparisons and rankings
+- Population diversity visualization
+- Token consumption analytics
+- Pattern discovery timeline
+- Service health status
+
+You can also monitor via WebSocket for programmatic integration or use the CLI command `dean-cli evolution monitor --trial-id <id>` for terminal-based monitoring.
 
 ### Configuration
 
@@ -228,6 +313,92 @@ patterns:
     min_effectiveness: 0.8          # Threshold for reuse eligibility
     test_before_deploy: true        # Validate in sandbox first
     compatibility_check: true       # Ensure pattern fits context
+```
+
+### DEAN System Operations
+
+#### Authentication and Access Control
+
+Before using any DEAN features, authenticate to obtain an access token:
+
+```bash
+# Login via CLI
+dean-cli auth login --username admin --password your_password
+
+# The CLI stores tokens securely for subsequent commands
+# To logout:
+dean-cli auth logout
+```
+
+For the web dashboard, navigate to http://localhost:8083 and use the login form.
+
+#### Service Health Monitoring
+
+DEAN continuously monitors all registered services:
+
+```bash
+# Check all service health
+dean-cli service health
+
+# Monitor specific service
+dean-cli service health --service indexagent
+
+# Get detailed service metrics
+dean-cli service metrics --service airflow --period 1h
+
+# View service logs
+dean-cli service logs --service evolution-api --tail 100
+```
+
+#### Workflow Management
+
+DEAN supports complex multi-service workflows:
+
+```bash
+# List available workflows
+dean-cli workflow list
+
+# Execute a predefined workflow
+dean-cli workflow execute --name pattern-propagation \
+  --params source_repo=IndexAgent target_repo=airflow-hub
+
+# Monitor workflow execution
+dean-cli workflow status --id <workflow_id>
+
+# Cancel running workflow
+dean-cli workflow cancel --id <workflow_id>
+```
+
+#### Batch Operations
+
+Manage multiple evolution trials efficiently:
+
+```bash
+# Start multiple trials with different configurations
+dean-cli batch create --config batch-evolution.yaml
+
+# Monitor all active trials
+dean-cli batch status
+
+# Export results from completed trials
+dean-cli batch export --format csv --output results/
+```
+
+Example batch configuration:
+```yaml
+trials:
+  - name: "High Token Efficiency"
+    population_size: 6
+    token_budget: 30000
+    generations: 15
+    focus: efficiency
+    
+  - name: "Innovation Focus"
+    population_size: 10
+    token_budget: 80000
+    generations: 25
+    mutation_rate: 0.3
+    focus: innovation
 ```
 
 ### Using the System

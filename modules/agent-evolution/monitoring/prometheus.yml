@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'token-economy'
+    static_configs:
+      - targets: ['token-economy:8091']
+    metrics_path: '/metrics'
+    scrape_interval: 5s
+
+  - job_name: 'dean-agents'
+    static_configs:
+      - targets: ['agent-evolution:8090']
+    metrics_path: '/metrics'
+
+# Alerting rules can be added here
+rule_files:
+  - '/etc/prometheus/alerts/*.yml'
+
+# Alert manager configuration (if using)
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []

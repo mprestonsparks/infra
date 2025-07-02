@@ -1,0 +1,41 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Additional requirements for token economy
+RUN pip install --no-cache-dir \
+    fastapi==0.104.1 \
+    uvicorn[standard]==0.24.0 \
+    sqlalchemy[asyncio]==2.0.23 \
+    asyncpg==0.29.0 \
+    redis[hiredis]==5.0.1 \
+    prometheus-client==0.19.0 \
+    pydantic==2.5.0 \
+    aiosqlite==0.19.0
+
+# Copy service code
+COPY services/token_economy.py /app/
+COPY services/__init__.py /app/
+
+# Create necessary directories
+RUN mkdir -p /app/logs /app/data
+
+# Expose port
+EXPOSE 8091
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8091/health || exit 1
+
+# Run the service
+CMD ["uvicorn", "token_economy:app", "--host", "0.0.0.0", "--port", "8091", "--log-level", "info"]

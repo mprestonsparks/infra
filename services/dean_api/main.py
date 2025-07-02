@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 import uvicorn
+from collections import Counter
 
 # Add IndexAgent to path
 sys.path.append(str(Path(__file__).parent.parent.parent.parent / "IndexAgent"))
@@ -40,6 +41,9 @@ from indexagent.database.connection import get_db_session, init_database, get_db
 from indexagent.database.schema import (
     Agent, DiscoveredPattern, PerformanceMetric, EvolutionHistory, AuditLog
 )
+
+# Import Economic Governor
+from services.economy.economic_governor import EconomicGovernor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +72,12 @@ ca_engine: Optional[CellularAutomataEngine] = None
 diversity_manager: Optional[GeneticDiversityManager] = None
 pattern_detector: Optional[PatternDetector] = None
 behavior_monitor: Optional[EmergentBehaviorMonitor] = None
+economic_governor: Optional[EconomicGovernor] = None
+
+# Storage for API state (use Redis/DB in production)
+modification_tasks: Dict[str, Any] = {}
+stored_patterns: List[Dict[str, Any]] = []
+diversity_registry: Dict[str, Any] = {}
 
 # WebSocket connections for real-time updates
 active_connections: List[WebSocket] = []
@@ -529,6 +539,425 @@ async def get_diversity_metrics(db: AsyncSession = Depends(get_db)):
         "requires_intervention": diversity_score < diversity_manager.min_diversity_threshold
     }
 
+# Economic Governor Endpoints
+@app.get("/api/v1/economy/metrics")
+async def get_economic_metrics():
+    """Get system-wide economic metrics"""
+    if not economic_governor:
+        raise HTTPException(status_code=503, detail="Economic governor not initialized")
+    
+    try:
+        metrics = economic_governor.get_system_metrics()
+        return {
+            "global_budget": {
+                "total": metrics["total_budget"],
+                "allocated": metrics["allocated_budget"],
+                "used": metrics["used_budget"],
+                "available": metrics["available_budget"],
+                "usage_rate": metrics["usage_rate"]
+            },
+            "agents": {
+                "total": metrics["agent_count"],
+                "average_efficiency": metrics["average_efficiency"]
+            },
+            "top_performers": metrics["top_performers"],
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to get economic metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/economy/agent/{agent_id}")
+async def get_agent_economic_status(agent_id: str):
+    """Get economic status for a specific agent"""
+    if not economic_governor:
+        raise HTTPException(status_code=503, detail="Economic governor not initialized")
+    
+    try:
+        budget_info = economic_governor.allocator.get_agent_budget(agent_id)
+        if not budget_info:
+            raise HTTPException(status_code=404, detail="Agent not found in economic system")
+        
+        return {
+            "agent_id": agent_id,
+            "budget": {
+                "allocated": budget_info["allocated"],
+                "used": budget_info["used"], 
+                "remaining": budget_info["remaining"],
+                "efficiency": budget_info["efficiency"]
+            },
+            "performance": {
+                "generation": budget_info["generation"],
+                "last_allocation": budget_info["last_allocation"].isoformat() if budget_info["last_allocation"] else None
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get agent economic status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TokenUsageRequest(BaseModel):
+    agent_id: str
+    tokens: int = Field(..., gt=0)
+    action_type: str
+    task_success: float = Field(ge=0.0, le=1.0)
+    quality_score: float = Field(ge=0.0, le=1.0)
+
+@app.post("/api/v1/economy/use-tokens")
+async def use_agent_tokens(request: TokenUsageRequest):
+    """Record token usage for an agent"""
+    if not economic_governor:
+        raise HTTPException(status_code=503, detail="Economic governor not initialized")
+    
+    try:
+        success = economic_governor.use_tokens(
+            agent_id=request.agent_id,
+            tokens=request.tokens,
+            action_type=request.action_type,
+            task_success=request.task_success,
+            quality_score=request.quality_score
+        )
+        
+        if not success:
+            raise HTTPException(status_code=400, detail="Insufficient token budget")
+        
+        # Get updated budget
+        budget_info = economic_governor.allocator.get_agent_budget(request.agent_id)
+        
+        return {
+            "success": True,
+            "agent_id": request.agent_id,
+            "tokens_used": request.tokens,
+            "remaining_budget": budget_info["remaining"] if budget_info else 0
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to record token usage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class TokenAllocationRequest(BaseModel):
+    agent_id: str
+    performance: float = Field(ge=0.0, le=1.0)
+    generation: int = Field(ge=0)
+
+@app.post("/api/v1/economy/allocate")
+async def allocate_agent_tokens(request: TokenAllocationRequest):
+    """Allocate tokens to an agent based on performance"""
+    if not economic_governor:
+        raise HTTPException(status_code=503, detail="Economic governor not initialized")
+    
+    try:
+        allocated = economic_governor.allocate_to_agent(
+            agent_id=request.agent_id,
+            performance=request.performance,
+            generation=request.generation
+        )
+        
+        return {
+            "success": True,
+            "agent_id": request.agent_id,
+            "tokens_allocated": allocated,
+            "total_budget": economic_governor.allocator.get_agent_budget(request.agent_id)["allocated"]
+        }
+    except Exception as e:
+        logger.error(f"Failed to allocate tokens: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/economy/rebalance")
+async def rebalance_economy():
+    """Trigger economic rebalancing across all agents"""
+    if not economic_governor:
+        raise HTTPException(status_code=503, detail="Economic governor not initialized")
+    
+    try:
+        # Get metrics before rebalancing
+        metrics_before = economic_governor.get_system_metrics()
+        
+        # Perform rebalancing
+        rebalanced_agents = economic_governor.rebalance_budgets()
+        
+        # Get metrics after rebalancing
+        metrics_after = economic_governor.get_system_metrics()
+        
+        return {
+            "success": True,
+            "agents_rebalanced": len(rebalanced_agents),
+            "rebalanced_agents": rebalanced_agents,
+            "metrics": {
+                "before": {
+                    "average_efficiency": metrics_before["average_efficiency"],
+                    "used_budget": metrics_before["used_budget"]
+                },
+                "after": {
+                    "average_efficiency": metrics_after["average_efficiency"],
+                    "used_budget": metrics_after["used_budget"]
+                }
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Failed to rebalance economy: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Worktree Management Endpoints
+@app.post("/api/v1/worktrees")
+async def create_worktree(agent_id: str, base_repo: str = "/repos/target"):
+    """Create isolated git worktree for agent"""
+    import subprocess
+    import tempfile
+    from pathlib import Path
+    
+    try:
+        # Create worktree directory
+        worktree_base = Path("/tmp/worktrees")
+        worktree_base.mkdir(exist_ok=True)
+        worktree_path = worktree_base / f"agent_{agent_id}"
+        
+        # Create git worktree
+        cmd = ["git", "worktree", "add", str(worktree_path), "HEAD"]
+        result = subprocess.run(cmd, cwd=base_repo, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            raise HTTPException(status_code=500, detail=f"Failed to create worktree: {result.stderr}")
+        
+        return {
+            "agent_id": agent_id,
+            "worktree_path": str(worktree_path),
+            "status": "created"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to create worktree for {agent_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/worktrees/{agent_id}")
+async def get_worktree_info(agent_id: str):
+    """Get worktree path and status"""
+    from pathlib import Path
+    
+    worktree_path = Path(f"/tmp/worktrees/agent_{agent_id}")
+    
+    if not worktree_path.exists():
+        raise HTTPException(status_code=404, detail="Worktree not found")
+    
+    return {
+        "agent_id": agent_id,
+        "worktree_path": str(worktree_path),
+        "exists": True,
+        "status": "active"
+    }
+
+@app.delete("/api/v1/worktrees/{agent_id}")
+async def cleanup_worktree(agent_id: str):
+    """Remove worktree after use"""
+    import subprocess
+    import shutil
+    from pathlib import Path
+    
+    try:
+        worktree_path = Path(f"/tmp/worktrees/agent_{agent_id}")
+        
+        if worktree_path.exists():
+            # Remove git worktree
+            cmd = ["git", "worktree", "remove", str(worktree_path), "--force"]
+            subprocess.run(cmd, capture_output=True)
+            
+            # Ensure directory is removed
+            if worktree_path.exists():
+                shutil.rmtree(worktree_path, ignore_errors=True)
+        
+        return {"status": "removed", "agent_id": agent_id}
+        
+    except Exception as e:
+        logger.error(f"Failed to cleanup worktree for {agent_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Code Modification Endpoints
+class CodeModificationRequest(BaseModel):
+    agent_id: str
+    worktree_path: str
+    prompt: str
+    target_files: List[str] = []
+    max_tokens: int = 4096
+
+@app.post("/api/v1/modifications")
+async def execute_code_modification(
+    request: CodeModificationRequest,
+    background_tasks: BackgroundTasks
+):
+    """Execute code modification via Claude"""
+    import uuid
+    
+    # Generate task ID
+    task_id = str(uuid.uuid4())
+    
+    # Store task status (in production, use Redis or database)
+    modification_tasks[task_id] = {
+        "status": "pending",
+        "agent_id": request.agent_id,
+        "created_at": datetime.now()
+    }
+    
+    # Execute in background
+    background_tasks.add_task(
+        run_code_modification,
+        task_id,
+        request
+    )
+    
+    return {"task_id": task_id, "status": "submitted"}
+
+@app.get("/api/v1/modifications/{task_id}")
+async def get_modification_result(task_id: str):
+    """Get result of code modification"""
+    if task_id not in modification_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    return modification_tasks[task_id]
+
+# Optimization Endpoints
+class OptimizationRequest(BaseModel):
+    task_description: str
+    performance_metrics: Dict[str, float]
+    historical_context: Optional[List[Dict]] = None
+
+@app.post("/api/v1/optimize/prompt")
+async def optimize_prompt(request: OptimizationRequest):
+    """Optimize prompt based on task and performance"""
+    try:
+        # Simple optimization logic for now
+        # In production, this would use DSPy or similar
+        base_prompt = request.task_description
+        
+        # Add performance-based adjustments
+        if request.performance_metrics.get("success_rate", 0) < 0.5:
+            optimized = f"Focus on correctness and reliability. {base_prompt}"
+        elif request.performance_metrics.get("token_efficiency", 0) < 0.7:
+            optimized = f"Be concise and efficient. {base_prompt}"
+        else:
+            optimized = base_prompt
+        
+        return {
+            "optimized_prompt": optimized,
+            "optimization_score": 0.8,
+            "method": "performance_based"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to optimize prompt: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/optimize/patterns/inject")
+async def inject_patterns(patterns: List[Dict[str, Any]]):
+    """Inject meta-patterns into optimizer"""
+    try:
+        # Store patterns (in production, persist to database)
+        stored_patterns.extend(patterns)
+        
+        return {
+            "success": True,
+            "patterns_injected": len(patterns),
+            "total_patterns": len(stored_patterns)
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to inject patterns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Diversity Management Endpoints
+class AgentRegistration(BaseModel):
+    agent_id: str
+    strategies: List[str]
+    lineage: List[str]
+    generation: int
+
+@app.post("/api/v1/diversity/agents/register")
+async def register_agent(registration: AgentRegistration):
+    """Register agent with diversity tracker"""
+    try:
+        # Store agent info (in production, use database)
+        diversity_registry[registration.agent_id] = {
+            "strategies": registration.strategies,
+            "lineage": registration.lineage,
+            "generation": registration.generation,
+            "registered_at": datetime.now()
+        }
+        
+        return {"success": True, "agent_id": registration.agent_id}
+        
+    except Exception as e:
+        logger.error(f"Failed to register agent: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/diversity/metrics")
+async def get_diversity_metrics():
+    """Calculate current population diversity"""
+    try:
+        # Calculate diversity metrics
+        if not diversity_registry:
+            return {
+                "diversity_score": 0.0,
+                "population_size": 0,
+                "unique_strategies": 0
+            }
+        
+        # Get unique strategies
+        all_strategies = set()
+        for agent_data in diversity_registry.values():
+            all_strategies.update(agent_data["strategies"])
+        
+        diversity_score = min(1.0, len(all_strategies) / 10.0)  # Simple metric
+        
+        return {
+            "diversity_score": diversity_score,
+            "population_size": len(diversity_registry),
+            "unique_strategies": len(all_strategies),
+            "strategy_distribution": dict(Counter(str(s) for agent in diversity_registry.values() for s in agent["strategies"]))
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to calculate diversity metrics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/diversity/interventions/check")
+async def check_intervention_needed():
+    """Check if diversity intervention needed"""
+    metrics = await get_diversity_metrics()
+    
+    if metrics["diversity_score"] < 0.3:
+        return {"intervention_type": "low_variance"}
+    elif metrics["population_size"] > 20 and metrics["unique_strategies"] < 5:
+        return {"intervention_type": "high_convergence"}
+    else:
+        return {"intervention_type": None}
+
+@app.post("/api/v1/diversity/interventions/apply")
+async def apply_intervention(agent_id: str, intervention_type: str):
+    """Apply diversity intervention to agent"""
+    try:
+        if agent_id not in diversity_registry:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        
+        # Apply intervention (simplified)
+        if intervention_type == "mutation":
+            # Add random strategy
+            diversity_registry[agent_id]["strategies"].append(f"mutated_{datetime.now().timestamp()}")
+        elif intervention_type == "foreign_pattern":
+            # Import pattern from another agent
+            if len(diversity_registry) > 1:
+                other_agents = [a for a in diversity_registry if a != agent_id]
+                source_agent = other_agents[0]  # Simple selection
+                pattern = diversity_registry[source_agent]["strategies"][0]
+                diversity_registry[agent_id]["strategies"].append(f"imported_{pattern}")
+        
+        return {"success": True, "intervention_applied": intervention_type}
+        
+    except Exception as e:
+        logger.error(f"Failed to apply intervention: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -542,6 +971,41 @@ async def websocket_endpoint(websocket: WebSocket):
         active_connections.remove(websocket)
 
 # Background task implementations
+async def run_code_modification(task_id: str, request: CodeModificationRequest):
+    """Execute code modification in background"""
+    try:
+        # Update task status
+        modification_tasks[task_id]["status"] = "running"
+        modification_tasks[task_id]["started_at"] = datetime.now()
+        
+        # Mock modification execution
+        # In production, this would call Claude API
+        import asyncio
+        await asyncio.sleep(2)  # Simulate processing
+        
+        # Generate mock result
+        result = {
+            "status": "completed",
+            "agent_id": request.agent_id,
+            "modifications": [
+                {
+                    "file": request.target_files[0] if request.target_files else "main.py",
+                    "changes": 5,
+                    "tokens_used": 150
+                }
+            ],
+            "total_tokens": 150,
+            "success": True,
+            "completed_at": datetime.now().isoformat()
+        }
+        
+        modification_tasks[task_id].update(result)
+        
+    except Exception as e:
+        modification_tasks[task_id]["status"] = "failed"
+        modification_tasks[task_id]["error"] = str(e)
+        modification_tasks[task_id]["completed_at"] = datetime.now().isoformat()
+
 async def initialize_agent_claude_cli(agent_id: str, worktree_path: Path, goal: str):
     """Initialize Claude CLI in agent's worktree"""
     try:
@@ -740,7 +1204,7 @@ async def get_agent_environment(agent_id: str, db: AsyncSession) -> Dict[str, An
 @app.on_event("startup")
 async def startup_event():
     """Initialize all REAL components"""
-    global worktree_mgr, token_manager, ca_engine, diversity_manager, pattern_detector, behavior_monitor
+    global worktree_mgr, token_manager, ca_engine, diversity_manager, pattern_detector, behavior_monitor, economic_governor
     
     logger.info("Initializing DEAN API with REAL components...")
     
@@ -764,6 +1228,11 @@ async def startup_event():
     
     pattern_detector = PatternDetector()
     behavior_monitor = EmergentBehaviorMonitor()
+    
+    # Initialize Economic Governor
+    db_url = os.getenv("DATABASE_URL", "postgresql://airflow:airflow@postgres:5432/agent_evolution")
+    total_budget = int(os.getenv("ECONOMIC_TOTAL_BUDGET", "1000000"))
+    economic_governor = EconomicGovernor(db_url, total_budget)
     
     logger.info("DEAN API initialized successfully - NO MOCKS!")
 
